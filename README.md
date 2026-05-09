@@ -54,7 +54,7 @@ Magic links return to the current app origin, for example `http://localhost:5173
 
 In the Supabase dashboard, open **Authentication > URL Configuration** and set:
 
-- **Site URL**: your production Vercel URL, for example `https://open-habits.vercel.app`
+- **Site URL**: `https://open-habits-pi.vercel.app`
 - **Redirect URLs**: add the local Vite URL and every deployed URL that can request magic links, for example `http://localhost:5173/**`, your production Vercel URL, and any Vercel preview URL pattern you use.
 
 If magic-link emails still point to `http://localhost:3000`, remove that stale value from the Supabase Auth URL settings or replace it with the actual Vercel site URL.

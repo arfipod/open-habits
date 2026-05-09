@@ -67,7 +67,7 @@ Magic links use the current browser origin as their redirect target. A link requ
 
 Supabase only honors redirect targets that are allowed in **Authentication > URL Configuration**. Configure:
 
-- **Site URL**: the production app URL, for example `https://open-habits.vercel.app`.
+- **Site URL**: `https://open-habits-pi.vercel.app`.
 - **Redirect URLs**: every origin that can request magic links, including `http://localhost:5173/**`, the production Vercel URL, and any Vercel preview URL pattern used for testing.
 
 If a magic-link email opens `http://localhost:3000`, the Supabase project likely still has `localhost:3000` as its Site URL or the requested app URL is missing from the Redirect URLs allow-list. Update those dashboard settings, request a new magic link, and use the new email. Old magic-link emails keep their original URL.
