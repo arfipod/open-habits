@@ -468,6 +468,55 @@ button.smallGhost {
   overflow: visible;
 }
 
+.scorePoint {
+  cursor: pointer;
+  outline: none;
+}
+
+.scorePointHitbox {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.scorePointDot {
+  transition: r .12s ease;
+}
+
+.scorePoint:focus-visible .scorePointDot,
+.scorePointDot.selected {
+  stroke: white;
+  stroke-width: 1.8;
+  r: 2.5;
+}
+
+.scorePointTooltip {
+  position: absolute;
+  left: calc(34px + var(--tooltip-x));
+  top: var(--tooltip-y);
+  z-index: 2;
+  transform: translate(-50%, calc(-100% - 10px));
+  display: grid;
+  gap: 2px;
+  min-width: 118px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #2f2f2f;
+  color: white;
+  box-shadow: var(--shadow);
+  text-align: center;
+  pointer-events: none;
+}
+
+.scorePointTooltip strong {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.scorePointTooltip span {
+  font-size: 12px;
+  color: #eeeeee;
+}
+
 .gridLine {
   stroke: #dedede;
   stroke-width: .5;
@@ -622,6 +671,12 @@ button.smallGhost {
 
 .frequencyChart { display: grid; gap: 12px; }
 
+.frequencySummary {
+  margin: 0 0 4px;
+  color: #777;
+  font-size: 15px;
+}
+
 .frequencyRow {
   display: grid;
   grid-template-columns: 55px 1fr;
@@ -693,6 +748,43 @@ button.smallGhost {
   gap: 6px;
   color: #666;
   font-weight: 700;
+}
+
+.frequencyBuilder {
+  display: grid;
+  grid-template-columns: auto minmax(84px, .7fr) auto minmax(84px, .7fr) minmax(132px, 1fr);
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.frequencyBuilder legend {
+  padding: 0 6px;
+  color: #666;
+  font-weight: 800;
+}
+
+.frequencyBuilder label {
+  min-width: 0;
+}
+
+.frequencyBuilder input,
+.frequencyBuilder select {
+  width: 100%;
+}
+
+.frequencyBuilder small {
+  grid-column: 1 / -1;
+  color: #777;
+}
+
+.frequencyText {
+  align-self: center;
+  color: #666;
+  font-weight: 700;
+  padding-bottom: 11px;
 }
 
 .twoCols {
@@ -852,6 +944,8 @@ button.smallGhost {
   .chartControls { flex-wrap: wrap; justify-content: end; }
   .scoreChartScroller { min-width: 620px; }
   .twoCols { grid-template-columns: 1fr; }
+  .frequencyBuilder { grid-template-columns: 1fr; }
+  .frequencyText { padding-bottom: 0; }
   .modalActions { grid-template-columns: 1fr 1fr; }
   .modalActions span { display: none; }
 }

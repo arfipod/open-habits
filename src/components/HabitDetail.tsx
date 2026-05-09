@@ -213,9 +213,18 @@ export function HabitDetail({ habit, entries, entryContexts, onEntriesChange, on
 }
 
 function frequencyLabel(habit: Habit): string {
-  if (habit.frequencyNumerator === habit.frequencyDenominator) return 'Every day'
-  if (habit.frequencyDenominator === 7) return `${habit.frequencyNumerator} / week`
-  return `${habit.frequencyNumerator}/${habit.frequencyDenominator}`
+  const times = Math.max(1, Math.round(habit.frequencyNumerator || 1))
+  const days = Math.max(1, Math.round(habit.frequencyDenominator || 1))
+  if (times === days) return 'At least once per day'
+  if (days % 30 === 0) {
+    const months = days / 30
+    return `At least ${times} time${times === 1 ? '' : 's'} every ${months} month${months === 1 ? '' : 's'}`
+  }
+  if (days % 7 === 0) {
+    const weeks = days / 7
+    return `At least ${times} time${times === 1 ? '' : 's'} every ${weeks} week${weeks === 1 ? '' : 's'}`
+  }
+  return `At least ${times} time${times === 1 ? '' : 's'} every ${days} day${days === 1 ? '' : 's'}`
 }
 
 function entryValueToInput(value: EntryValue, habit: Habit): string {
@@ -284,6 +293,7 @@ function ScoreChart({ habit, entries, period, offset, referenceDate }: { habit: 
 }
 
 function LineChart({ points, color }: { points: ScorePoint[], color: string }) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const width = 100
   const height = 100
   const innerLeft = 8
@@ -298,18 +308,62 @@ function LineChart({ points, color }: { points: ScorePoint[], color: string }) {
     const y = innerTop + (1 - point.score) * chartHeight
     return { x, y, point }
   })
+  const selected = selectedIndex === null ? null : coords[selectedIndex]
   const path = coords.map((c, index) => `${index === 0 ? 'M' : 'L'} ${c.x.toFixed(2)} ${c.y.toFixed(2)}`).join(' ')
 
   return (
-    <div className="scoreChartScroller">
+    <div
+      className="scoreChartScroller"
+      style={{
+        '--tooltip-x': selected ? `${selected.x}%` : '50%',
+        '--tooltip-y': selected ? `${selected.y}%` : '50%'
+      } as CSSProperties}
+    >
       <svg className="scoreSvg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Score chart">
         {[1, .8, .6, .4, .2, 0].map(level => {
           const y = innerTop + (1 - level) * chartHeight
           return <line key={level} x1={innerLeft} x2={width - innerRight} y1={y} y2={y} className="gridLine" />
         })}
         <path d={path} fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        {coords.map(c => <circle key={c.point.date} cx={c.x} cy={c.y} r="1.5" fill={color} vectorEffect="non-scaling-stroke" />)}
+        {coords.map((c, index) => {
+          const percent = Math.round(c.point.score * 100)
+          const label = `${formatLong(c.point.date)}: ${percent}%`
+          return (
+            <g
+              key={c.point.date}
+              className="scorePoint"
+              role="button"
+              tabIndex={0}
+              aria-label={label}
+              onClick={() => setSelectedIndex(index)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setSelectedIndex(index)
+                }
+              }}
+            >
+              <title>{label}</title>
+              <circle className="scorePointHitbox" cx={c.x} cy={c.y} r="4.5" vectorEffect="non-scaling-stroke" />
+              <circle
+                className={selectedIndex === index ? 'scorePointDot selected' : 'scorePointDot'}
+                cx={c.x}
+                cy={c.y}
+                r="1.5"
+                fill={color}
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          )
+        })}
       </svg>
+
+      {selected && (
+        <div className="scorePointTooltip" role="status">
+          <strong>{Math.round(selected.point.score * 100)}%</strong>
+          <span>{formatLong(selected.point.date)}</span>
+        </div>
+      )}
 
       <div className="scoreYAxis">
         <span>100%</span><span>80%</span><span>60%</span><span>40%</span><span>20%</span>
@@ -410,6 +464,7 @@ function FrequencyChart({ habit, entries }: { habit: Habit, entries: HabitEntry[
   const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   return (
     <div className="frequencyChart">
+      <p className="frequencySummary">{frequencyLabel(habit)}</p>
       {labels.map((label, index) => (
         <div key={label} className="frequencyRow">
           <span>{label}</span>

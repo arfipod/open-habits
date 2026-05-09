@@ -25,6 +25,7 @@ import {
   scoreChartPoints,
   scoreSeries,
   successForDisplay,
+  successForStreak,
   toggleEntry,
   upsertEntry,
   weekdayFrequency
@@ -239,6 +240,22 @@ describe('history, calendar, streak and frequency calculations', () => {
     expect(bestStreaks(habit, entries, '2026-01-07')).toEqual([
       { start: '2026-01-04', end: '2026-01-06', days: 3 },
       { start: '2026-01-01', end: '2026-01-02', days: 2 }
+    ])
+  })
+
+  it('counts missing days as zero for AT_MOST numerical streaks', () => {
+    const habit = makeNumericalHabit({ targetType: 'AT_MOST', targetValue: 0 })
+    const entries = entriesFor(habit, [
+      ['2026-01-01', 0],
+      ['2026-01-04', 1000],
+      ['2026-01-06', 0]
+    ])
+
+    expect(successForDisplay(habit, undefined)).toBe(false)
+    expect(successForStreak(habit, undefined)).toBe(true)
+    expect(bestStreaks(habit, entries, '2026-01-07')).toEqual([
+      { start: '2026-01-01', end: '2026-01-03', days: 3 },
+      { start: '2026-01-05', end: '2026-01-07', days: 3 }
     ])
   })
 

@@ -121,6 +121,13 @@ export function successForDisplay(habit: Habit, value: EntryValue | undefined): 
   return amount >= (habit.targetValue ?? 1)
 }
 
+export function successForStreak(habit: Habit, value: EntryValue | undefined): boolean {
+  if (value === undefined && habit.type === 'NUMERICAL' && habit.targetType === 'AT_MOST') {
+    return 0 <= (habit.targetValue ?? 0)
+  }
+  return successForDisplay(habit, value)
+}
+
 export function displayValue(habit: Habit, value: EntryValue | undefined): string {
   const raw = entryToInt(value)
   if (raw === ENTRY.UNKNOWN) return ''
@@ -326,7 +333,7 @@ export function bestStreaks(habit: Habit, entries: HabitEntry[], referenceDate: 
   let count = 0
 
   for (const date of daysBetween(oldest, referenceDate)) {
-    const ok = successForDisplay(habit, map.get(date)?.value)
+    const ok = successForStreak(habit, map.get(date)?.value)
     if (ok) {
       start ??= date
       end = date
