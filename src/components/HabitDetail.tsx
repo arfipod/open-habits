@@ -293,7 +293,7 @@ function ScoreChart({ habit, entries, period, offset, referenceDate }: { habit: 
 }
 
 function LineChart({ points, color }: { points: ScorePoint[], color: string }) {
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+  const [activeIndex, setActiveIndex] = useState<number | null>(null)
   const width = 100
   const height = 100
   const innerLeft = 8
@@ -308,15 +308,15 @@ function LineChart({ points, color }: { points: ScorePoint[], color: string }) {
     const y = innerTop + (1 - point.score) * chartHeight
     return { x, y, point }
   })
-  const selected = selectedIndex === null ? null : coords[selectedIndex]
+  const active = activeIndex === null ? null : coords[activeIndex]
   const path = coords.map((c, index) => `${index === 0 ? 'M' : 'L'} ${c.x.toFixed(2)} ${c.y.toFixed(2)}`).join(' ')
 
   return (
     <div
       className="scoreChartScroller"
       style={{
-        '--tooltip-x': selected ? `${selected.x}%` : '50%',
-        '--tooltip-y': selected ? `${selected.y}%` : '50%'
+        '--tooltip-x': active ? `${active.x}%` : '50%',
+        '--tooltip-y': active ? `${active.y}%` : '50%'
       } as CSSProperties}
     >
       <svg className="scoreSvg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Score chart">
@@ -332,21 +332,17 @@ function LineChart({ points, color }: { points: ScorePoint[], color: string }) {
             <g
               key={c.point.date}
               className="scorePoint"
-              role="button"
               tabIndex={0}
               aria-label={label}
-              onClick={() => setSelectedIndex(index)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  setSelectedIndex(index)
-                }
-              }}
+              onMouseEnter={() => setActiveIndex(index)}
+              onMouseLeave={() => setActiveIndex(null)}
+              onFocus={() => setActiveIndex(index)}
+              onBlur={() => setActiveIndex(null)}
             >
               <title>{label}</title>
               <circle className="scorePointHitbox" cx={c.x} cy={c.y} r="4.5" vectorEffect="non-scaling-stroke" />
               <circle
-                className={selectedIndex === index ? 'scorePointDot selected' : 'scorePointDot'}
+                className={activeIndex === index ? 'scorePointDot active' : 'scorePointDot'}
                 cx={c.x}
                 cy={c.y}
                 r="1.5"
@@ -358,10 +354,10 @@ function LineChart({ points, color }: { points: ScorePoint[], color: string }) {
         })}
       </svg>
 
-      {selected && (
+      {active && (
         <div className="scorePointTooltip" role="status">
-          <strong>{Math.round(selected.point.score * 100)}%</strong>
-          <span>{formatLong(selected.point.date)}</span>
+          <strong>{Math.round(active.point.score * 100)}%</strong>
+          <span>{formatLong(active.point.date)}</span>
         </div>
       )}
 

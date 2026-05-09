@@ -469,7 +469,7 @@ button.smallGhost {
 }
 
 .scorePoint {
-  cursor: pointer;
+  cursor: default;
   outline: none;
 }
 
@@ -483,7 +483,7 @@ button.smallGhost {
 }
 
 .scorePoint:focus-visible .scorePointDot,
-.scorePointDot.selected {
+.scorePointDot.active {
   stroke: white;
   stroke-width: 1.8;
   r: 2.5;
