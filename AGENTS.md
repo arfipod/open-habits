@@ -307,7 +307,7 @@ Important details:
 - `UNKNOWN` should not count as success.
 - Numerical values are evaluated according to `targetType`.
 - YES/NO values are evaluated according to Loop semantics.
-- Keep test coverage around score behavior, especially for `No PMO`-style habits.
+- Keep test coverage around score behavior, especially for `No something`-style habits.
 
 ## Import/Export Rules
 

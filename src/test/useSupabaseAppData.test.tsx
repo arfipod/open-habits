@@ -197,6 +197,16 @@ describe('useSupabaseAppData', () => {
     expect(result.current.error).toBe('Export failed')
   })
 
+  it('explains missing Supabase tables with setup steps', async () => {
+    mocks.fetchAppData.mockRejectedValueOnce(new Error("Could not find the table 'public.habits' in the schema cache"))
+    const { result } = renderHook(() => useSupabaseAppData(USER_ID))
+
+    await waitFor(() => {
+      expect(result.current.error).toContain('Supabase database tables are missing')
+    })
+    expect(result.current.error).toContain('npx supabase db push')
+  })
+
   it('clears data and rejects mutations when there is no signed-in user', async () => {
     const { result } = renderHook(() => useSupabaseAppData(null))
 

@@ -293,5 +293,16 @@ function sortData(data: AppData): AppData {
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
+  if (!(error instanceof Error)) return fallback
+
+  if (isMissingSupabaseSchemaError(error.message)) {
+    return 'Supabase database tables are missing. Run `npx supabase login`, `npx supabase link --project-ref tpehkqzwlbtdonizlody`, and `npx supabase db push`, then refresh Open Habits.'
+  }
+
+  return error.message
+}
+
+function isMissingSupabaseSchemaError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return normalized.includes('schema cache') && normalized.includes('public.')
 }

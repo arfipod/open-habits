@@ -25,15 +25,24 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your_publishable_key_here
 
 Do not place database connection URLs, Postgres passwords, service role keys, personal access tokens, or a Supabase Direct Connection String in frontend code, tests, docs, committed files, or generated artifacts.
 
-## CLI Setup
+## CLI Access And Migration Setup
 
-Use the Supabase CLI:
+Use the Supabase CLI to authenticate this machine, link the local repository to the hosted project, and apply the committed migrations.
+
+The commands below use `npx supabase` so the workflow does not require a global Supabase CLI install:
 
 ```bash
-supabase login
-supabase init
-supabase link --project-ref tpehkqzwlbtdonizlody
-supabase db push
+npx supabase login
+npx supabase link --project-ref tpehkqzwlbtdonizlody
+npx supabase db push
+```
+
+During `npx supabase login`, the CLI opens a browser login flow and may print a one-time login URL plus a verification code prompt. Do not commit or document those one-time URLs, verification codes, generated access tokens, or personal access tokens.
+
+During `npx supabase db push`, confirm the prompt to apply pending migrations to the remote database. For a fresh project, the expected pending migration is:
+
+```text
+20260509103411_initial_schema.sql
 ```
 
 The database migration files live in:
@@ -41,6 +50,16 @@ The database migration files live in:
 ```text
 supabase/migrations/
 ```
+
+After the migration has been applied, start the app:
+
+```bash
+npm run dev
+```
+
+Open the local URL printed by Vite. If the default port is already occupied, Vite will choose the next available port, for example `http://localhost:5175/`.
+
+If the app logs in successfully but the main screen shows an error such as `Could not find the table 'public.habits' in the schema cache`, the Auth setup is working but the database schema has not been applied to the linked project yet. Run `npx supabase db push`, wait a few seconds for the Supabase REST schema cache to refresh, and reload the app.
 
 ## Schema
 
@@ -93,7 +112,7 @@ supabase/migrations/
 After adding or changing migrations:
 
 ```bash
-supabase db push
+npx supabase db push
 ```
 
 When a migration changes the public schema, regenerate TypeScript types:
