@@ -1,7 +1,11 @@
-import JSZip from 'jszip'
 import { AppData, EntryValue, Habit, HabitEntry, HabitEntryContext, HabitType, TargetType } from '../types'
 import { createId, intToEntryValue, nowISO, scoreSeries } from './calculations'
 import { formatNumber, numericAmount } from './calculations'
+
+async function loadJSZip() {
+  const { default: JSZip } = await import('jszip')
+  return JSZip
+}
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = []
@@ -70,6 +74,7 @@ function habitFolderName(index: number, habit: Habit): string {
 }
 
 export async function parseLoopZip(file: File): Promise<AppData> {
+  const JSZip = await loadJSZip()
   const zip = await JSZip.loadAsync(await file.arrayBuffer())
   const habitsEntry = zip.file('Habits.csv')
   if (!habitsEntry) throw new Error('The ZIP does not contain Habits.csv')
@@ -190,6 +195,7 @@ function sortData(data: AppData): AppData {
 }
 
 export async function exportLoopZip(data: AppData, selectedHabitIds: Set<string>, includeAllHabitMetadata = true): Promise<Blob> {
+  const JSZip = await loadJSZip()
   const zip = new JSZip()
   const selectedHabits = data.habits.filter(h => selectedHabitIds.has(h.id))
   const metadataHabits = includeAllHabitMetadata ? data.habits : selectedHabits
@@ -209,6 +215,7 @@ export async function exportLoopZip(data: AppData, selectedHabitIds: Set<string>
 }
 
 export async function exportOpenHabitsBackupZip(data: AppData): Promise<Blob> {
+  const JSZip = await loadJSZip()
   const zip = new JSZip()
   zip.file('OpenHabits.json', JSON.stringify(openHabitsBackup(data), null, 2))
   zip.file('Habits.csv', buildHabitsCsv(data.habits))
@@ -218,6 +225,7 @@ export async function exportOpenHabitsBackupZip(data: AppData): Promise<Blob> {
 }
 
 export async function parseOpenHabitsBackupZip(file: File): Promise<AppData> {
+  const JSZip = await loadJSZip()
   const zip = await JSZip.loadAsync(await file.arrayBuffer())
   const backupEntry = zip.file('OpenHabits.json')
   if (!backupEntry) throw new Error('The ZIP does not contain OpenHabits.json')
@@ -235,6 +243,7 @@ export async function parseOpenHabitsBackupZip(file: File): Promise<AppData> {
 }
 
 export async function parseImportZip(file: File): Promise<AppData> {
+  const JSZip = await loadJSZip()
   const zip = await JSZip.loadAsync(await file.arrayBuffer())
   return zip.file('OpenHabits.json')
     ? parseOpenHabitsBackupZip(file)
