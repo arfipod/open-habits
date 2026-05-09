@@ -27,9 +27,15 @@ export function useSupabaseAppData(userId: string | null) {
     dataRef.current = data
   }, [data])
 
+  const commitData = useCallback((next: AppData | ((current: AppData) => AppData)) => {
+    const resolved = typeof next === 'function' ? next(dataRef.current) : next
+    dataRef.current = resolved
+    setData(resolved)
+  }, [])
+
   const refresh = useCallback(async (): Promise<AppData> => {
     if (!userId) {
-      setData(emptyData)
+      commitData(emptyData)
       setLoading(false)
       return emptyData
     }
@@ -38,7 +44,7 @@ export function useSupabaseAppData(userId: string | null) {
     setError(null)
     try {
       const next = await fetchAppData(userId)
-      setData(next)
+      commitData(next)
       return next
     } catch (refreshError) {
       const message = errorMessage(refreshError, 'Could not load habits.')
@@ -47,14 +53,14 @@ export function useSupabaseAppData(userId: string | null) {
     } finally {
       setLoading(false)
     }
-  }, [userId])
+  }, [commitData, userId])
 
   useEffect(() => {
     let ignore = false
 
     async function load() {
       if (!userId) {
-        setData(emptyData)
+        commitData(emptyData)
         setLoading(false)
         return
       }
@@ -63,7 +69,7 @@ export function useSupabaseAppData(userId: string | null) {
       setError(null)
       try {
         const next = await fetchAppData(userId)
-        if (!ignore) setData(next)
+        if (!ignore) commitData(next)
       } catch (loadError) {
         if (!ignore) setError(errorMessage(loadError, 'Could not load habits.'))
       } finally {
@@ -75,34 +81,34 @@ export function useSupabaseAppData(userId: string | null) {
     return () => {
       ignore = true
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const saveHabit = useCallback(async (habit: Habit): Promise<Habit> => {
     if (!userId) throw new Error('Sign in before saving habits.')
 
     const previous = dataRef.current
     const exists = previous.habits.some(existing => existing.id === habit.id)
-    setData(mergeHabit(previous, habit))
+    commitData(mergeHabit(previous, habit))
     setError(null)
 
     try {
       const saved = exists
         ? await updateHabit(habit, { userId })
         : await createHabit(habit, { userId })
-      setData(current => mergeHabit(current, saved))
+      commitData(current => mergeHabit(current, saved))
       return saved
     } catch (saveError) {
-      setData(previous)
+      commitData(previous)
       setError(errorMessage(saveError, 'Could not save habit.'))
       throw saveError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const deleteHabit = useCallback(async (habitId: string): Promise<void> => {
     if (!userId) throw new Error('Sign in before deleting habits.')
 
     const previous = dataRef.current
-    setData({
+    commitData({
       habits: previous.habits.filter(habit => habit.id !== habitId),
       entries: previous.entries.filter(entry => entry.habitId !== habitId),
       entryContexts: previous.entryContexts.filter(context => context.habitId !== habitId)
@@ -112,35 +118,35 @@ export function useSupabaseAppData(userId: string | null) {
     try {
       await deleteHabitFromSupabase(habitId, { userId })
     } catch (deleteError) {
-      setData(previous)
+      commitData(previous)
       setError(errorMessage(deleteError, 'Could not delete habit.'))
       throw deleteError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const upsertEntry = useCallback(async (entry: HabitEntry): Promise<HabitEntry> => {
     if (!userId) throw new Error('Sign in before saving entries.')
 
     const previous = dataRef.current
-    setData(mergeEntry(previous, entry))
+    commitData(mergeEntry(previous, entry))
     setError(null)
 
     try {
       const saved = await upsertEntryInSupabase(entry, { userId })
-      setData(current => mergeEntry(current, saved))
+      commitData(current => mergeEntry(current, saved))
       return saved
     } catch (upsertError) {
-      setData(previous)
+      commitData(previous)
       setError(errorMessage(upsertError, 'Could not save entry.'))
       throw upsertError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const deleteEntry = useCallback(async (entryId: string): Promise<void> => {
     if (!userId) throw new Error('Sign in before deleting entries.')
 
     const previous = dataRef.current
-    setData({
+    commitData({
       ...previous,
       entries: previous.entries.filter(entry => entry.id !== entryId),
       entryContexts: previous.entryContexts.filter(context => context.entryId !== entryId)
@@ -150,11 +156,11 @@ export function useSupabaseAppData(userId: string | null) {
     try {
       await deleteEntryFromSupabase(entryId, { userId })
     } catch (deleteError) {
-      setData(previous)
+      commitData(previous)
       setError(errorMessage(deleteError, 'Could not delete entry.'))
       throw deleteError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const importData = useCallback(async (file: File, replaceCurrent: boolean): Promise<AppData> => {
     if (!userId) throw new Error('Sign in before importing data.')
@@ -166,7 +172,7 @@ export function useSupabaseAppData(userId: string | null) {
       const next = replaceCurrent
         ? await replaceAllUserDataFromImport(parsed, file.name, { userId })
         : await appendUserDataFromImport(parsed, file.name, { userId })
-      setData(next)
+      commitData(next)
       return next
     } catch (importError) {
       setError(errorMessage(importError, 'Could not import the ZIP.'))
@@ -174,7 +180,7 @@ export function useSupabaseAppData(userId: string | null) {
     } finally {
       setLoading(false)
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const exportableDataForUser = useCallback(async (): Promise<AppData> => {
     if (!userId) throw new Error('Sign in before exporting data.')
@@ -182,37 +188,37 @@ export function useSupabaseAppData(userId: string | null) {
     setError(null)
     try {
       const next = await loadExportableDataForUser({ userId })
-      setData(next)
+      commitData(next)
       return next
     } catch (exportError) {
       setError(errorMessage(exportError, 'Could not load fresh export data.'))
       throw exportError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const upsertEntryContext = useCallback(async (context: HabitEntryContext): Promise<HabitEntryContext> => {
     if (!userId) throw new Error('Sign in before saving entry context.')
 
     const previous = dataRef.current
-    setData(mergeEntryContext(previous, context))
+    commitData(mergeEntryContext(previous, context))
     setError(null)
 
     try {
       const saved = await upsertEntryContextInSupabase(context, { userId })
-      setData(current => mergeEntryContext(current, saved))
+      commitData(current => mergeEntryContext(current, saved))
       return saved
     } catch (upsertError) {
-      setData(previous)
+      commitData(previous)
       setError(errorMessage(upsertError, 'Could not save entry context.'))
       throw upsertError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   const deleteEntryContext = useCallback(async (entryId: string): Promise<void> => {
     if (!userId) throw new Error('Sign in before deleting entry context.')
 
     const previous = dataRef.current
-    setData({
+    commitData({
       ...previous,
       entryContexts: previous.entryContexts.filter(context => context.entryId !== entryId)
     })
@@ -221,11 +227,11 @@ export function useSupabaseAppData(userId: string | null) {
     try {
       await deleteEntryContextFromSupabase(entryId, { userId })
     } catch (deleteError) {
-      setData(previous)
+      commitData(previous)
       setError(errorMessage(deleteError, 'Could not delete entry context.'))
       throw deleteError
     }
-  }, [userId])
+  }, [commitData, userId])
 
   return {
     loading,
