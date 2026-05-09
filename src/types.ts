@@ -1,6 +1,14 @@
 export type HabitType = 'YES_NO' | 'NUMERICAL'
 export type TargetType = 'AT_LEAST' | 'AT_MOST' | ''
-export type EntryValue = number | 'YES_MANUAL' | 'YES_AUTO' | 'NO' | 'SKIP' | 'UNKNOWN'
+export type PeriodKind = 'week' | 'month' | 'quarter' | 'year'
+
+export type EntryValue =
+  | 'YES_MANUAL'
+  | 'YES_AUTO'
+  | 'NO'
+  | 'SKIP'
+  | 'UNKNOWN'
+  | number
 
 export interface Habit {
   id: string
@@ -16,6 +24,8 @@ export interface Habit {
   targetType: TargetType
   targetValue: number | null
   archived: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 export interface HabitEntry {
@@ -23,7 +33,9 @@ export interface HabitEntry {
   habitId: string
   date: string
   value: EntryValue
-  notes?: string
+  notes: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface AppData {
@@ -34,6 +46,14 @@ export interface AppData {
 export interface ScorePoint {
   date: string
   score: number
+}
+
+export interface HistoryPoint {
+  key: string
+  label: string
+  start: string
+  end: string
+  value: number
 }
 
 export interface Streak {

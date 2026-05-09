@@ -1,7 +1,7 @@
 {
-  "name": "open-habits-fixed",
+  "name": "open-habits-loop-v03",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -10,11 +10,11 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.3.4",
-    "typescript": "^5.5.4",
+    "jszip": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "jszip": "^3.10.1"
+    "typescript": "^5.5.4",
+    "vite": "^5.3.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

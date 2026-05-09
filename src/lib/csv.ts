@@ -1,178 +1,274 @@
 import JSZip from 'jszip'
 import { AppData, EntryValue, Habit, HabitEntry, HabitType, TargetType } from '../types'
-import { scoreSeries } from './calculations'
+import { createId, intToEntryValue, nowISO, scoreSeries } from './calculations'
+import { formatNumber, numericAmount } from './calculations'
 
-function parseCsvLine(line: string): string[] {
-  const out: string[] = []
-  let cur = ''
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
   let quoted = false
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]
-    if (c === '"') {
-      if (quoted && line[i + 1] === '"') { cur += '"'; i++ }
-      else quoted = !quoted
-    } else if (c === ',' && !quoted) {
-      out.push(cur)
-      cur = ''
-    } else cur += c
+
+  const src = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]
+    if (ch === '"') {
+      if (quoted && src[i + 1] === '"') {
+        cell += '"'
+        i++
+      } else {
+        quoted = !quoted
+      }
+    } else if (ch === ',' && !quoted) {
+      row.push(cell)
+      cell = ''
+    } else if (ch === '\n' && !quoted) {
+      row.push(cell)
+      if (row.some(v => v.length > 0)) rows.push(row)
+      row = []
+      cell = ''
+    } else {
+      cell += ch
+    }
   }
-  out.push(cur)
-  return out
+
+  row.push(cell)
+  if (row.some(v => v.length > 0)) rows.push(row)
+  return rows
 }
 
 function csvEscape(value: unknown): string {
   const s = String(value ?? '')
-  if (/[",\n\r]/.test(s)) return `"${s.replaceAll('"', '""')}"`
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }
 
-function parseCsv(text: string): string[][] {
-  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(Boolean).map(parseCsvLine)
+function get(row: string[], header: string[], name: string): string {
+  const index = header.indexOf(name)
+  return index >= 0 ? row[index] ?? '' : ''
 }
 
-function parseLoopValue(raw: string): EntryValue {
-  if (raw === 'YES_MANUAL' || raw === 'YES_AUTO' || raw === 'NO' || raw === 'SKIP' || raw === 'UNKNOWN') return raw
-  if (raw === '') return 'UNKNOWN'
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : 'UNKNOWN'
+export function parseLoopEntryValue(raw: string): EntryValue {
+  const value = raw.trim()
+  if (!value) return 'UNKNOWN'
+  if (value === 'YES_MANUAL' || value === 'YES_AUTO' || value === 'NO' || value === 'SKIP' || value === 'UNKNOWN') return value
+  const n = Number(value)
+  return Number.isFinite(n) ? intToEntryValue(n) : 'UNKNOWN'
 }
 
-function serializeValue(value: EntryValue): string {
+export function serializeEntryValue(value: EntryValue): string {
   return typeof value === 'number' ? String(value) : value
 }
 
-function slugName(position: string, name: string): string {
-  return `${position} ${name}`.replace(/[\\/:*?"<>|]/g, '-')
+function sanitizeFolderName(value: string): string {
+  const sane = value.replace(/[^ a-zA-Z0-9._-]+/g, '').trim().slice(0, 100)
+  return sane || 'Habit'
+}
+
+function habitFolderName(index: number, habit: Habit): string {
+  return `${String(index + 1).padStart(3, '0')} ${sanitizeFolderName(habit.name)}/`
 }
 
 export async function importLoopZip(file: File, replaceCurrent: boolean, current: AppData): Promise<AppData> {
   const zip = await JSZip.loadAsync(file)
-  const habitsFile = zip.file('Habits.csv')
-  if (!habitsFile) throw new Error('Habits.csv not found in ZIP')
+  const habitsEntry = zip.file('Habits.csv')
+  if (!habitsEntry) throw new Error('The ZIP does not contain Habits.csv')
 
-  const habitsText = await habitsFile.async('string')
-  const rows = parseCsv(habitsText)
+  const rows = parseCsv(await habitsEntry.async('string'))
+  if (rows.length < 2) throw new Error('Habits.csv does not contain any habits')
+
   const header = rows[0]
-  const importedHabits: Habit[] = rows.slice(1).map(row => {
-    const get = (name: string) => row[header.indexOf(name)] ?? ''
-    const position = get('Position')
+  const timestamp = nowISO()
+  const importedHabits: Habit[] = rows.slice(1).map((row, index) => {
+    const position = get(row, header, 'Position') || String(index + 1).padStart(3, '0')
+    const type = (get(row, header, 'Type') || 'YES_NO') as HabitType
+    const targetRaw = get(row, header, 'Target Value')
     return {
-      id: crypto.randomUUID(),
+      id: createId(),
       position,
-      name: get('Name'),
-      type: (get('Type') || 'YES_NO') as HabitType,
-      question: get('Question'),
-      description: get('Description'),
-      frequencyNumerator: Number(get('FrequencyNumerator') || 1),
-      frequencyDenominator: Number(get('FrequencyDenominator') || 1),
-      color: get('Color') || '#8E24AA',
-      unit: get('Unit'),
-      targetType: (get('Target Type') || '') as TargetType,
-      targetValue: get('Target Value') === '' ? null : Number(get('Target Value')),
-      archived: get('Archived?') === 'true'
+      name: get(row, header, 'Name') || `Habit ${position}`,
+      type,
+      question: get(row, header, 'Question'),
+      description: get(row, header, 'Description'),
+      frequencyNumerator: Number(get(row, header, 'FrequencyNumerator') || 1),
+      frequencyDenominator: Number(get(row, header, 'FrequencyDenominator') || 1),
+      color: get(row, header, 'Color') || '#8E24AA',
+      unit: get(row, header, 'Unit'),
+      targetType: (get(row, header, 'Target Type') || (type === 'NUMERICAL' ? 'AT_LEAST' : '')) as TargetType,
+      targetValue: targetRaw === '' ? (type === 'NUMERICAL' ? 1 : null) : Number(targetRaw),
+      archived: get(row, header, 'Archived?') === 'true',
+      createdAt: timestamp,
+      updatedAt: timestamp
     }
   })
 
-  const positionToId = new Map(importedHabits.map(h => [h.position, h.id]))
-  const nameToId = new Map(importedHabits.map(h => [h.name, h.id]))
+  const byPosition = new Map(importedHabits.map(h => [h.position, h.id]))
+  const byName = new Map(importedHabits.map(h => [h.name, h.id]))
   const importedEntries: HabitEntry[] = []
+  const coveredHabits = new Set<string>()
 
-  // Prefer per-habit Checkmarks.csv folders: "001 No PMO/Checkmarks.csv"
   for (const path of Object.keys(zip.files)) {
-    const m = path.match(/^(\d+)\s.*\/Checkmarks\.csv$/)
-    if (!m) continue
-    const habitId = positionToId.get(m[1])
+    const match = path.match(/^(\d{3})\s.*\/Checkmarks\.csv$/)
+    if (!match) continue
+    const habitId = byPosition.get(match[1])
     if (!habitId) continue
-    const text = await zip.file(path)!.async('string')
-    const lines = parseCsv(text)
-    const h = lines[0]
-    const dateIdx = h.indexOf('Date')
-    const valueIdx = h.indexOf('Value')
-    const notesIdx = h.indexOf('Notes')
-    for (const row of lines.slice(1)) {
-      const date = row[dateIdx]
-      const valueRaw = row[valueIdx]
-      if (!date || valueRaw === undefined || valueRaw === '') continue
+    const entry = zip.file(path)
+    if (!entry) continue
+
+    const checkRows = parseCsv(await entry.async('string'))
+    if (checkRows.length < 2) continue
+    const checkHeader = checkRows[0]
+    const dateIndex = checkHeader.indexOf('Date')
+    const valueIndex = checkHeader.indexOf('Value')
+    const notesIndex = checkHeader.indexOf('Notes')
+
+    checkRows.slice(1).forEach(row => {
+      const date = row[dateIndex]
+      const rawValue = row[valueIndex]
+      if (!date || rawValue === undefined || rawValue === '') return
       importedEntries.push({
-        id: crypto.randomUUID(),
+        id: createId(),
         habitId,
         date,
-        value: parseLoopValue(valueRaw),
-        notes: notesIdx >= 0 ? row[notesIdx] : ''
+        value: parseLoopEntryValue(rawValue),
+        notes: notesIndex >= 0 ? row[notesIndex] ?? '' : '',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    })
+    coveredHabits.add(habitId)
+  }
+
+  const aggregate = zip.file('Checkmarks.csv')
+  if (aggregate) {
+    const aggregateRows = parseCsv(await aggregate.async('string'))
+    if (aggregateRows.length >= 2) {
+      const aggregateHeader = aggregateRows[0]
+      aggregateRows.slice(1).forEach(row => {
+        const date = row[0]
+        if (!date) return
+        for (let i = 1; i < aggregateHeader.length; i++) {
+          const habitName = aggregateHeader[i]
+          if (!habitName) continue
+          const habitId = byName.get(habitName)
+          if (!habitId || coveredHabits.has(habitId)) continue
+          const rawValue = row[i]
+          if (rawValue === undefined || rawValue === '') continue
+          importedEntries.push({
+            id: createId(),
+            habitId,
+            date,
+            value: parseLoopEntryValue(rawValue),
+            notes: '',
+            createdAt: timestamp,
+            updatedAt: timestamp
+          })
+        }
       })
     }
   }
 
-  // Fallback/use aggregate Checkmarks.csv for habits not covered by folders
-  const coveredHabitIds = new Set(importedEntries.map(e => e.habitId))
-  const aggregate = zip.file('Checkmarks.csv')
-  if (aggregate) {
-    const text = await aggregate.async('string')
-    const lines = parseCsv(text)
-    const header = lines[0]
-    for (const row of lines.slice(1)) {
-      const date = row[0]
-      for (let i = 1; i < header.length; i++) {
-        const habitName = header[i]
-        const habitId = nameToId.get(habitName)
-        if (!habitId || coveredHabitIds.has(habitId)) continue
-        const raw = row[i]
-        if (!date || raw === undefined || raw === '') continue
-        importedEntries.push({ id: crypto.randomUUID(), habitId, date, value: parseLoopValue(raw) })
-      }
-    }
-  }
+  const next = replaceCurrent
+    ? { habits: importedHabits, entries: importedEntries }
+    : { habits: [...current.habits, ...importedHabits], entries: [...current.entries, ...importedEntries] }
 
-  if (replaceCurrent) return { habits: importedHabits, entries: importedEntries }
+  return sortData(next)
+}
 
+function sortData(data: AppData): AppData {
   return {
-    habits: [...current.habits, ...importedHabits],
-    entries: [...current.entries, ...importedEntries]
+    habits: [...data.habits].sort((a, b) => a.position.localeCompare(b.position)),
+    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date))
   }
 }
 
-export async function exportLoopZip(data: AppData, selectedHabitIds: Set<string>): Promise<Blob> {
+export async function exportLoopZip(data: AppData, selectedHabitIds: Set<string>, includeAllHabitMetadata = true): Promise<Blob> {
   const zip = new JSZip()
-  const habits = data.habits.filter(h => selectedHabitIds.has(h.id))
-  const entries = data.entries.filter(e => selectedHabitIds.has(e.habitId))
-  const byHabit = new Map(habits.map(h => [h.id, h]))
+  const selectedHabits = data.habits.filter(h => selectedHabitIds.has(h.id))
+  const metadataHabits = includeAllHabitMetadata ? data.habits : selectedHabits
+  const selectedEntries = data.entries.filter(e => selectedHabitIds.has(e.habitId))
 
-  const habitsRows = [
-    ['Position','Name','Type','Question','Description','FrequencyNumerator','FrequencyDenominator','Color','Unit','Target Type','Target Value','Archived?'],
-    ...habits.map((h, idx) => [
-      String(idx + 1).padStart(3, '0'), h.name, h.type, h.question, h.description,
-      h.frequencyNumerator, h.frequencyDenominator, h.color, h.unit, h.targetType,
-      h.targetValue ?? '', h.archived
-    ])
-  ]
-  zip.file('Habits.csv', habitsRows.map(r => r.map(csvEscape).join(',')).join('\n'))
+  zip.file('Habits.csv', buildHabitsCsv(metadataHabits))
+  zip.file('Checkmarks.csv', buildAggregateCheckmarksCsv(selectedHabits, selectedEntries))
+  zip.file('Scores.csv', buildAggregateScoresCsv(selectedHabits, selectedEntries))
 
-  const dates = [...new Set(entries.map(e => e.date))].sort().reverse()
-  const aggregate = [['Date', ...habits.map(h => h.name), '']]
-  for (const date of dates) {
-    aggregate.push([date, ...habits.map(h => serializeValue(entries.find(e => e.habitId === h.id && e.date === date)?.value ?? 'UNKNOWN')), ''])
-  }
-  zip.file('Checkmarks.csv', aggregate.map(r => r.map(csvEscape).join(',')).join('\n'))
-
-  const scoreRows = [['Date', ...habits.map(h => h.name), '']]
-  for (const date of dates) {
-    scoreRows.push([date, ...habits.map(h => {
-      const s = scoreSeries(h, entries).find(p => p.date === date)
-      return s ? s.score.toFixed(4) : ''
-    }), ''])
-  }
-  zip.file('Scores.csv', scoreRows.map(r => r.map(csvEscape).join(',')).join('\n'))
-
-  habits.forEach((h, idx) => {
-    const position = String(idx + 1).padStart(3, '0')
-    const folder = zip.folder(slugName(position, h.name))!
-    const hEntries = entries.filter(e => e.habitId === h.id).sort((a, b) => b.date.localeCompare(a.date))
-    const checkRows = [['Date','Value','Notes'], ...hEntries.map(e => [e.date, serializeValue(e.value), e.notes ?? ''])]
-    folder.file('Checkmarks.csv', checkRows.map(r => r.map(csvEscape).join(',')).join('\n'))
-
-    const scoreRows = [['Date','Score'], ...scoreSeries(h, entries).sort((a,b)=>b.date.localeCompare(a.date)).map(p => [p.date, p.score.toFixed(4)])]
-    folder.file('Scores.csv', scoreRows.map(r => r.map(csvEscape).join(',')).join('\n'))
+  selectedHabits.forEach((habit, index) => {
+    const folder = zip.folder(habitFolderName(index, habit))!
+    folder.file('Checkmarks.csv', buildHabitCheckmarksCsv(habit, selectedEntries))
+    folder.file('Scores.csv', buildHabitScoresCsv(habit, selectedEntries))
   })
 
   return zip.generateAsync({ type: 'blob' })
+}
+
+function buildHabitsCsv(habits: Habit[]): string {
+  const rows = [
+    ['Position', 'Name', 'Type', 'Question', 'Description', 'FrequencyNumerator', 'FrequencyDenominator', 'Color', 'Unit', 'Target Type', 'Target Value', 'Archived?'],
+    ...habits.map((h, index) => [
+      h.position || String(index + 1).padStart(3, '0'),
+      h.name,
+      h.type,
+      h.question,
+      h.description,
+      h.frequencyNumerator,
+      h.frequencyDenominator,
+      h.color,
+      h.unit,
+      h.type === 'NUMERICAL' ? h.targetType : '',
+      h.type === 'NUMERICAL' && h.targetValue !== null ? h.targetValue : '',
+      h.archived
+    ])
+  ]
+  return toCsv(rows)
+}
+
+function buildAggregateCheckmarksCsv(habits: Habit[], entries: HabitEntry[]): string {
+  const dates = allDates(entries)
+  const rows: unknown[][] = [['Date', ...habits.map(h => h.name), '']]
+  dates.forEach(date => {
+    rows.push([date, ...habits.map(h => serializeEntryValue(entries.find(e => e.habitId === h.id && e.date === date)?.value ?? 'UNKNOWN')), ''])
+  })
+  return toCsv(rows)
+}
+
+function buildAggregateScoresCsv(habits: Habit[], entries: HabitEntry[]): string {
+  const dates = allDates(entries)
+  const scoreMaps = new Map(habits.map(h => [h.id, new Map(scoreSeries(h, entries).map(s => [s.date, s.score]))]))
+  const rows: unknown[][] = [['Date', ...habits.map(h => h.name), '']]
+  dates.forEach(date => {
+    rows.push([date, ...habits.map(h => (scoreMaps.get(h.id)?.get(date) ?? 0).toFixed(4)), ''])
+  })
+  return toCsv(rows)
+}
+
+function buildHabitCheckmarksCsv(habit: Habit, entries: HabitEntry[]): string {
+  const rows: unknown[][] = [['Date', 'Value', 'Notes']]
+  entries.filter(e => e.habitId === habit.id).sort((a, b) => b.date.localeCompare(a.date)).forEach(e => {
+    rows.push([e.date, serializeEntryValue(e.value), e.notes])
+  })
+  return toCsv(rows)
+}
+
+function buildHabitScoresCsv(habit: Habit, entries: HabitEntry[]): string {
+  const rows: unknown[][] = [['Date', 'Score']]
+  scoreSeries(habit, entries).sort((a, b) => b.date.localeCompare(a.date)).forEach(s => {
+    rows.push([s.date, s.score.toFixed(4)])
+  })
+  return toCsv(rows)
+}
+
+function allDates(entries: HabitEntry[]): string[] {
+  return [...new Set(entries.map(e => e.date))].sort((a, b) => b.localeCompare(a))
+}
+
+function toCsv(rows: unknown[][]): string {
+  return rows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n'
+}
+
+export function exportDebugSummary(data: AppData): string {
+  return data.habits.map(habit => {
+    const entries = data.entries.filter(e => e.habitId === habit.id)
+    const total = entries.reduce((sum, entry) => sum + numericAmount(entry.value), 0)
+    return `${habit.position} ${habit.name}: ${entries.length} entries, numerical total ${formatNumber(total)}`
+  }).join('\n')
 }

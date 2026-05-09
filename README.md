@@ -1,48 +1,69 @@
-# Open Habits Fixed
+# Open Habits Loop v0.3
 
-Frontend responsive en React + Vite + TypeScript para replicar la experiencia básica de Loop Habit Tracker.
+Responsive React + Vite + TypeScript frontend that replicates the core logic of Loop Habit Tracker / Android Habits.
 
-## Ejecutar
+## Run
 
 ```bash
+unzip open-habits-loop-v03.zip
+cd open-habits-loop-v03
 npm install
 npm run dev
 ```
 
-Abre:
+Open the URL shown by Vite, usually:
 
 ```text
 http://localhost:5173
 ```
 
-## Importar ZIP
+## Import a Loop Habit Tracker ZIP
 
-Pulsa **Importar ZIP** y selecciona una exportación de Loop Habit Tracker / Android Habits.
+1. Click **Import ZIP**.
+2. Select the ZIP exported from Android Habits / Loop Habit Tracker.
+3. Keep **Replace on import** enabled to clear previous data.
 
-Soporta:
-
-```text
-Habits.csv
-Checkmarks.csv
-Scores.csv
-001 Nombre/Checkmarks.csv
-001 Nombre/Scores.csv
-```
-
-La app importa `Habits.csv` y los `Checkmarks.csv`. Los `Scores.csv` no se importan como verdad fuente: se recalculan desde las entradas.
-
-## Exportar ZIP
-
-Pulsa **Exportar ZIP**. Exporta:
+The app reads:
 
 ```text
 Habits.csv
 Checkmarks.csv
 Scores.csv
-001 Nombre/Checkmarks.csv
-001 Nombre/Scores.csv
+001 Habit name/Checkmarks.csv
+001 Habit name/Scores.csv
 ```
 
-## Nota
+`Scores.csv` files are exported, but when importing they are recalculated from `Checkmarks.csv`, because daily entries are the real source of truth.
 
-Esta versión corrige la anterior: ahora la importación no solo cuenta archivos del ZIP, sino que parsea hábitos y registros y actualiza la UI.
+## Important v0.3 Fix
+
+The score formula now replicates Loop's core logic:
+
+```text
+multiplier = 0.5 ^ (sqrt(frequency) / 13)
+score = previousScore * multiplier + checkmarkValue * (1 - multiplier)
+```
+
+Also:
+
+- For numerical `AT_MOST` habits, the initial score is `1.0`.
+- For numerical habits, a rolling sum is calculated across `FrequencyDenominator` days.
+- For non-daily boolean habits, smoothing is applied by doubling the numerator and denominator, as Loop does.
+- `SKIP` does not update the score.
+
+With the `No PMO` sample ZIP, the expected latest score is `0.8453` for `2026-05-08`.
+
+## Included Features
+
+- Import ZIP files.
+- Export ZIP files for one or more habits.
+- Create, edit, archive, and delete habits.
+- `YES_NO` and `NUMERICAL` habits.
+- `AT_LEAST` and `AT_MOST` targets.
+- Target: today, week, month, quarter, year.
+- Score with left/right navigation.
+- History by week/month/quarter/year with navigation.
+- Calendar in a Monday-Sunday weekly grid with horizontal navigation.
+- Best streaks.
+- Frequency.
+- Local persistence with `localStorage`.

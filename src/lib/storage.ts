@@ -1,20 +1,20 @@
 import { AppData } from '../types'
 
-const KEY = 'open-habits-data-v2'
+const STORAGE_KEY = 'open-habits-loop-data-v03'
 
 export function loadData(): AppData | null {
   try {
-    const raw = localStorage.getItem(KEY)
-    return raw ? JSON.parse(raw) : null
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) as AppData : null
   } catch {
     return null
   }
 }
 
 export function saveData(data: AppData): void {
-  localStorage.setItem(KEY, JSON.stringify(data))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
 }
 
 export function clearData(): void {
-  localStorage.removeItem(KEY)
+  localStorage.removeItem(STORAGE_KEY)
 }
