@@ -1,6 +1,8 @@
-import type { EntryValue, Habit, HabitEntry, TargetType } from '../../types'
+import type { EntryValue, Habit, HabitEntry, HabitEntryContext, TargetType } from '../../types'
 import type {
   EntryValueKindDb,
+  HabitEntryContextInsert,
+  HabitEntryContextRow,
   HabitEntryInsert,
   HabitEntryRow,
   HabitEntryUpdate,
@@ -101,6 +103,35 @@ export function entryToUpdate(entry: HabitEntry): HabitEntryUpdate {
     ...entryValueToDb(entry.value),
     notes: entry.notes,
     updated_at: entry.updatedAt
+  }
+}
+
+export function contextRowToHabitEntryContext(row: HabitEntryContextRow): HabitEntryContext {
+  return {
+    id: row.id,
+    habitId: row.habit_id,
+    entryId: row.entry_id,
+    occurredAt: row.occurred_at,
+    occurredTime: row.occurred_time,
+    locationText: row.location_text ?? '',
+    comment: row.comment ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+export function contextToInsert(context: HabitEntryContext, userId: string): HabitEntryContextInsert {
+  return {
+    id: context.id,
+    user_id: userId,
+    habit_id: context.habitId,
+    entry_id: context.entryId,
+    occurred_at: context.occurredAt,
+    occurred_time: context.occurredTime,
+    location_text: context.locationText,
+    comment: context.comment,
+    created_at: context.createdAt,
+    updated_at: context.updatedAt
   }
 }
 

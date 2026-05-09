@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import { AppData, EntryValue, Habit, HabitEntry, HabitType, TargetType } from '../types'
+import { AppData, EntryValue, Habit, HabitEntry, HabitEntryContext, HabitType, TargetType } from '../types'
 import { createId, intToEntryValue, nowISO, scoreSeries } from './calculations'
 import { formatNumber, numericAmount } from './calculations'
 
@@ -168,7 +168,7 @@ export async function parseLoopZip(file: File): Promise<AppData> {
     }
   }
 
-  return sortData({ habits: importedHabits, entries: importedEntries })
+  return sortData({ habits: importedHabits, entries: importedEntries, entryContexts: [] })
 }
 
 export async function importLoopZip(file: File, replaceCurrent: boolean, current: AppData): Promise<AppData> {
@@ -176,14 +176,16 @@ export async function importLoopZip(file: File, replaceCurrent: boolean, current
   if (replaceCurrent) return imported
   return sortData({
     habits: [...current.habits, ...imported.habits],
-    entries: [...current.entries, ...imported.entries]
+    entries: [...current.entries, ...imported.entries],
+    entryContexts: current.entryContexts
   })
 }
 
 function sortData(data: AppData): AppData {
   return {
     habits: [...data.habits].sort((a, b) => a.position.localeCompare(b.position)),
-    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date))
+    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date)),
+    entryContexts: [...data.entryContexts].sort((a, b) => a.habitId.localeCompare(b.habitId) || a.entryId.localeCompare(b.entryId))
   }
 }
 
@@ -204,6 +206,57 @@ export async function exportLoopZip(data: AppData, selectedHabitIds: Set<string>
   })
 
   return zip.generateAsync({ type: 'blob' })
+}
+
+export async function exportOpenHabitsBackupZip(data: AppData): Promise<Blob> {
+  const zip = new JSZip()
+  zip.file('OpenHabits.json', JSON.stringify(openHabitsBackup(data), null, 2))
+  zip.file('Habits.csv', buildHabitsCsv(data.habits))
+  zip.file('Checkmarks.csv', buildAggregateCheckmarksCsv(data.habits, data.entries))
+  zip.file('Scores.csv', buildAggregateScoresCsv(data.habits, data.entries))
+  return zip.generateAsync({ type: 'blob' })
+}
+
+export async function parseOpenHabitsBackupZip(file: File): Promise<AppData> {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer())
+  const backupEntry = zip.file('OpenHabits.json')
+  if (!backupEntry) throw new Error('The ZIP does not contain OpenHabits.json')
+
+  const raw = JSON.parse(await backupEntry.async('string')) as Partial<OpenHabitsBackup>
+  if (!Array.isArray(raw.habits) || !Array.isArray(raw.entries)) {
+    throw new Error('OpenHabits.json is missing habits or entries.')
+  }
+
+  return sortData({
+    habits: raw.habits,
+    entries: raw.entries,
+    entryContexts: Array.isArray(raw.contexts) ? raw.contexts : []
+  })
+}
+
+export async function parseImportZip(file: File): Promise<AppData> {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer())
+  return zip.file('OpenHabits.json')
+    ? parseOpenHabitsBackupZip(file)
+    : parseLoopZip(file)
+}
+
+interface OpenHabitsBackup {
+  backupVersion: 1
+  exportedAt: string
+  habits: Habit[]
+  entries: HabitEntry[]
+  contexts: HabitEntryContext[]
+}
+
+function openHabitsBackup(data: AppData): OpenHabitsBackup {
+  return {
+    backupVersion: 1,
+    exportedAt: nowISO(),
+    habits: data.habits,
+    entries: data.entries,
+    contexts: data.entryContexts
+  }
 }
 
 function buildHabitsCsv(habits: Habit[]): string {

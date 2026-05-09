@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import type { Habit, HabitEntry } from './types'
+import type { Habit, HabitEntry, HabitEntryContext } from './types'
 import { AuthGate } from './components/AuthGate'
 import { HabitDetail } from './components/HabitDetail'
 import { HabitForm } from './components/HabitForm'
 import { HabitList } from './components/HabitList'
 import { UserMenu } from './components/UserMenu'
-import { defaultHabit, normalizeHabit, referenceDateForData } from './lib/calculations'
-import { exportLoopZip } from './lib/csv'
+import { createId, defaultHabit, normalizeHabit, nowISO, referenceDateForData } from './lib/calculations'
+import { exportLoopZip, exportOpenHabitsBackupZip } from './lib/csv'
 import { todayISO } from './lib/date'
 import { loadSelectedHabitId, saveSelectedHabitId } from './lib/storage'
 import { useSupabaseAppData } from './hooks/useSupabaseAppData'
@@ -35,6 +35,8 @@ function HabitsApp({ session }: { session: Session }) {
     deleteHabit: deleteHabitFromSupabase,
     upsertEntry: persistEntry,
     deleteEntry: deleteEntryFromSupabase,
+    upsertEntryContext: persistEntryContext,
+    deleteEntryContext: deleteEntryContextFromSupabase,
     importData,
     exportableDataForUser,
     clearError
@@ -43,6 +45,7 @@ function HabitsApp({ session }: { session: Session }) {
   const [replaceImport, setReplaceImport] = useState(true)
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [exportMode, setExportMode] = useState<'android' | 'backup'>('android')
   const [exportSelection, setExportSelection] = useState<Set<string>>(new Set())
   const [includeAllMetadata, setIncludeAllMetadata] = useState(true)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -89,17 +92,26 @@ function HabitsApp({ session }: { session: Session }) {
 
   function openExportModal() {
     setExportSelection(new Set(data.habits.map(h => h.id)))
+    setExportMode('android')
     setExportOpen(true)
   }
 
   async function handleExport() {
-    if (exportSelection.size === 0) {
+    if (exportMode === 'android' && exportSelection.size === 0) {
       notify('error', 'Select at least one habit to export.')
       return
     }
 
     try {
       const freshData = await exportableDataForUser()
+      if (exportMode === 'backup') {
+        const blob = await exportOpenHabitsBackupZip(freshData)
+        downloadBlob(blob, `open-habits-backup-${todayISO()}.zip`)
+        setExportOpen(false)
+        notify('success', 'Open Habits full backup created from fresh Supabase data.')
+        return
+      }
+
       const freshHabitIds = new Set(freshData.habits.map(habit => habit.id))
       const selected = new Set([...exportSelection].filter(habitId => freshHabitIds.has(habitId)))
       if (selected.size === 0) {
@@ -108,14 +120,9 @@ function HabitsApp({ session }: { session: Session }) {
       }
 
       const blob = await exportLoopZip(freshData, selected, includeAllMetadata)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `open-habits-export-${todayISO()}.zip`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadBlob(blob, `open-habits-android-export-${todayISO()}.zip`)
       setExportOpen(false)
-      notify('success', 'Export ZIP created from fresh Supabase data.')
+      notify('success', 'Android-compatible ZIP created from fresh Supabase data.')
     } catch (exportError) {
       notify('error', errorMessage(exportError, 'Could not export habits.'))
     }
@@ -163,6 +170,29 @@ function HabitsApp({ session }: { session: Session }) {
       for (const entry of removed) {
         await deleteEntryFromSupabase(entry.id)
       }
+    } catch (entryError) {
+      notify('error', errorMessage(entryError, 'Could not save entry.'))
+    }
+  }
+
+  async function saveEntryWithContext(entry: HabitEntry, context: HabitEntryContext | null) {
+    try {
+      const saved = await persistEntry(entry)
+      if (context) {
+        const existing = data.entryContexts.find(candidate => candidate.entryId === saved.id || candidate.entryId === entry.id)
+        const timestamp = nowISO()
+        await persistEntryContext({
+          ...context,
+          id: existing?.id ?? context.id ?? createId(),
+          habitId: saved.habitId,
+          entryId: saved.id,
+          createdAt: existing?.createdAt ?? context.createdAt ?? timestamp,
+          updatedAt: timestamp
+        })
+      } else {
+        await deleteEntryContextFromSupabase(saved.id)
+      }
+      notify('success', 'Entry saved.')
     } catch (entryError) {
       notify('error', errorMessage(entryError, 'Could not save entry.'))
     }
@@ -244,7 +274,9 @@ function HabitsApp({ session }: { session: Session }) {
               <HabitDetail
                 habit={selectedHabit}
                 entries={data.entries}
+                entryContexts={data.entryContexts}
                 onEntriesChange={entries => void saveEntries(entries)}
+                onSaveEntryWithContext={(entry, context) => void saveEntryWithContext(entry, context)}
                 onEdit={() => setEditingHabit(selectedHabit)}
               />
             ) : (
@@ -279,37 +311,68 @@ function HabitsApp({ session }: { session: Session }) {
             </header>
 
             <label className="inlineCheck">
-              <input type="checkbox" checked={includeAllMetadata} onChange={e => setIncludeAllMetadata(e.target.checked)} />
+              <input
+                type="radio"
+                name="exportMode"
+                value="android"
+                checked={exportMode === 'android'}
+                onChange={() => setExportMode('android')}
+              />
+              Export Android-compatible ZIP
+            </label>
+
+            <label className="inlineCheck">
+              <input
+                type="radio"
+                name="exportMode"
+                value="backup"
+                checked={exportMode === 'backup'}
+                onChange={() => setExportMode('backup')}
+              />
+              Export Open Habits full backup
+            </label>
+
+            <label className="inlineCheck">
+              <input
+                type="checkbox"
+                checked={includeAllMetadata}
+                disabled={exportMode === 'backup'}
+                onChange={e => setIncludeAllMetadata(e.target.checked)}
+              />
               Include all habits in Habits.csv, even when only selected entries are exported
             </label>
 
-            <div className="exportList">
-              {data.habits.map(habit => (
-                <label key={habit.id} className="exportItem">
-                  <input
-                    type="checkbox"
-                    checked={exportSelection.has(habit.id)}
-                    onChange={e => {
-                      setExportSelection(prev => {
-                        const next = new Set(prev)
-                        if (e.target.checked) next.add(habit.id)
-                        else next.delete(habit.id)
-                        return next
-                      })
-                    }}
-                  />
-                  <span className="colorDot" style={{ background: habit.color }} />
-                  <span>{habit.position} · {habit.name}</span>
-                </label>
-              ))}
-            </div>
+            {exportMode === 'backup' ? (
+              <p className="exportNote">The full backup includes all habits, entries, and optional context fields.</p>
+            ) : (
+              <div className="exportList">
+                {data.habits.map(habit => (
+                  <label key={habit.id} className="exportItem">
+                    <input
+                      type="checkbox"
+                      checked={exportSelection.has(habit.id)}
+                      onChange={e => {
+                        setExportSelection(prev => {
+                          const next = new Set(prev)
+                          if (e.target.checked) next.add(habit.id)
+                          else next.delete(habit.id)
+                          return next
+                        })
+                      }}
+                    />
+                    <span className="colorDot" style={{ background: habit.color }} />
+                    <span>{habit.position} · {habit.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
 
             <footer className="modalActions">
-              <button type="button" className="secondary" onClick={() => setExportSelection(new Set(data.habits.map(h => h.id)))}>All</button>
-              <button type="button" className="secondary" onClick={() => setExportSelection(new Set(selectedHabit ? [selectedHabit.id] : []))}>Current only</button>
+              <button type="button" className="secondary" disabled={exportMode === 'backup'} onClick={() => setExportSelection(new Set(data.habits.map(h => h.id)))}>All</button>
+              <button type="button" className="secondary" disabled={exportMode === 'backup'} onClick={() => setExportSelection(new Set(selectedHabit ? [selectedHabit.id] : []))}>Current only</button>
               <span />
               <button type="button" className="secondary" onClick={() => setExportOpen(false)}>Cancel</button>
-              <button type="button" onClick={() => void handleExport()}>Export ZIP</button>
+              <button type="button" onClick={() => void handleExport()}>{exportMode === 'backup' ? 'Export Backup' : 'Export ZIP'}</button>
             </footer>
           </section>
         </div>
@@ -325,6 +388,15 @@ function sameEntry(a: HabitEntry, b: HabitEntry): boolean {
     a.notes === b.notes &&
     a.createdAt === b.createdAt &&
     a.updatedAt === b.updatedAt
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function errorMessage(error: unknown, fallback: string): string {

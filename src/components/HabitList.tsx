@@ -12,7 +12,7 @@ interface Props {
 }
 
 export function HabitList({ habits, entries, selectedId, onSelect, onEntriesChange }: Props) {
-  const reference = referenceDateForData({ habits, entries })
+  const reference = referenceDateForData({ habits, entries, entryContexts: [] })
   const dates = Array.from({ length: 5 }, (_, i) => addDays(reference, -i))
 
   return (

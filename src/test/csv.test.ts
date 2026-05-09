@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import { defaultHabit, upsertEntry } from '../lib/calculations'
-import { exportLoopZip, importLoopZip, parseLoopZip } from '../lib/csv'
+import { exportLoopZip, exportOpenHabitsBackupZip, importLoopZip, parseImportZip, parseLoopZip } from '../lib/csv'
 import type { AppData } from '../types'
 
 describe('Loop ZIP import/export', () => {
@@ -29,7 +29,7 @@ describe('Loop ZIP import/export', () => {
     const currentHabit = defaultHabit(1)
     const file = await loopZipFile()
 
-    const merged = await importLoopZip(file, false, { habits: [currentHabit], entries: [] })
+    const merged = await importLoopZip(file, false, { habits: [currentHabit], entries: [], entryContexts: [] })
 
     expect(merged.habits.map(habit => habit.name)).toContain(currentHabit.name)
     expect(merged.habits.map(habit => habit.name)).toContain('Read')
@@ -39,7 +39,18 @@ describe('Loop ZIP import/export', () => {
     const habit = { ...defaultHabit(1), id: '11111111-1111-4111-8111-111111111111', name: 'Read' }
     const data: AppData = {
       habits: [habit],
-      entries: upsertEntry([], habit, '2026-05-09', 'yes', 'Book notes')
+      entries: upsertEntry([], habit, '2026-05-09', 'yes', 'Book notes'),
+      entryContexts: [{
+        id: '22222222-2222-4222-8222-222222222222',
+        habitId: habit.id,
+        entryId: '33333333-3333-4333-8333-333333333333',
+        occurredAt: '2026-05-09T07:30:00',
+        occurredTime: '07:30',
+        locationText: 'Home office',
+        comment: 'Felt focused',
+        createdAt: '2026-05-09T07:31:00Z',
+        updatedAt: '2026-05-09T07:31:00Z'
+      }]
     }
 
     const blob = await exportLoopZip(data, new Set([habit.id]))
@@ -55,7 +66,75 @@ describe('Loop ZIP import/export', () => {
     expect(serialized).not.toContain('occurred_at')
     expect(serialized).not.toContain('occurred_time')
     expect(serialized).not.toContain('comment')
+    expect(serialized).not.toContain('Home office')
+    expect(serialized).not.toContain('Felt focused')
     expect(serialized).not.toContain('user_id')
+  })
+
+  it('exports Open Habits full backup with contexts', async () => {
+    const habit = { ...defaultHabit(1), id: '11111111-1111-4111-8111-111111111111', name: 'Read' }
+    const entries = upsertEntry([], habit, '2026-05-09', 'yes', 'Book notes')
+    const data: AppData = {
+      habits: [habit],
+      entries,
+      entryContexts: [{
+        id: '22222222-2222-4222-8222-222222222222',
+        habitId: habit.id,
+        entryId: entries[0].id,
+        occurredAt: '2026-05-09T07:30:00',
+        occurredTime: '07:30',
+        locationText: 'Home office',
+        comment: 'Felt focused',
+        createdAt: '2026-05-09T07:31:00Z',
+        updatedAt: '2026-05-09T07:31:00Z'
+      }]
+    }
+
+    const blob = await exportOpenHabitsBackupZip(data)
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const backup = JSON.parse(await zip.file('OpenHabits.json')!.async('string'))
+
+    expect(zip.file('Habits.csv')).toBeTruthy()
+    expect(zip.file('Checkmarks.csv')).toBeTruthy()
+    expect(zip.file('Scores.csv')).toBeTruthy()
+    expect(backup.backupVersion).toBe(1)
+    expect(backup.contexts).toHaveLength(1)
+    expect(backup.contexts[0]).toMatchObject({
+      occurredTime: '07:30',
+      locationText: 'Home office',
+      comment: 'Felt focused'
+    })
+  })
+
+  it('imports Open Habits backup contexts from OpenHabits.json', async () => {
+    const habit = { ...defaultHabit(1), id: '11111111-1111-4111-8111-111111111111', name: 'Read' }
+    const entries = upsertEntry([], habit, '2026-05-09', 'yes')
+    const original: AppData = {
+      habits: [habit],
+      entries,
+      entryContexts: [{
+        id: '22222222-2222-4222-8222-222222222222',
+        habitId: habit.id,
+        entryId: entries[0].id,
+        occurredAt: '2026-05-09T07:30:00',
+        occurredTime: '07:30',
+        locationText: 'Home office',
+        comment: 'Felt focused',
+        createdAt: '2026-05-09T07:31:00Z',
+        updatedAt: '2026-05-09T07:31:00Z'
+      }]
+    }
+    const blob = await exportOpenHabitsBackupZip(original)
+    const file = new File([blob], 'backup.zip', { type: 'application/zip' })
+
+    const parsed = await parseImportZip(file)
+
+    expect(parsed.entryContexts).toHaveLength(1)
+    expect(parsed.entryContexts[0]).toMatchObject({
+      occurredTime: '07:30',
+      locationText: 'Home office',
+      comment: 'Felt focused'
+    })
   })
 })
 

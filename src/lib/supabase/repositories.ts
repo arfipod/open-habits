@@ -1,14 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AppData, Habit, HabitEntry } from '../../types'
+import type { AppData, Habit, HabitEntry, HabitEntryContext } from '../../types'
 import type {
   Database,
-  HabitEntryContextInsert,
-  HabitEntryContextRow,
   ImportBatchRow,
   Json
 } from './database.types'
 import { supabase } from './client'
 import {
+  contextRowToHabitEntryContext,
+  contextToInsert,
   entryRowToHabitEntry,
   entryToInsert,
   entryToUpdate,
@@ -32,8 +32,6 @@ export interface ImportBatchInput {
   metadata?: Json
 }
 
-export type HabitEntryContextInput = Omit<HabitEntryContextInsert, 'user_id'>
-
 export async function getCurrentUserId(client: Client = supabase): Promise<string> {
   const { data, error } = await client.auth.getUser()
   if (error) throw new Error(error.message)
@@ -44,7 +42,7 @@ export async function getCurrentUserId(client: Client = supabase): Promise<strin
 export async function fetchAppData(userId: string, options: RepositoryOptions = {}): Promise<AppData> {
   const client = repositoryClient(options)
 
-  const [habitsResult, entriesResult] = await Promise.all([
+  const [habitsResult, entriesResult, contextsResult] = await Promise.all([
     client
       .from('habits')
       .select('*')
@@ -55,15 +53,22 @@ export async function fetchAppData(userId: string, options: RepositoryOptions = 
       .select('*')
       .eq('user_id', userId)
       .order('habit_id', { ascending: true })
-      .order('date', { ascending: false })
+      .order('date', { ascending: false }),
+    client
+      .from('habit_entry_contexts')
+      .select('*')
+      .eq('user_id', userId)
+      .order('habit_id', { ascending: true })
   ])
 
   if (habitsResult.error) throw new Error(habitsResult.error.message)
   if (entriesResult.error) throw new Error(entriesResult.error.message)
+  if (contextsResult.error) throw new Error(contextsResult.error.message)
 
   return sortData({
     habits: (habitsResult.data ?? []).map(habitRowToHabit),
-    entries: (entriesResult.data ?? []).map(entryRowToHabitEntry)
+    entries: (entriesResult.data ?? []).map(entryRowToHabitEntry),
+    entryContexts: (contextsResult.data ?? []).map(contextRowToHabitEntryContext)
   })
 }
 
@@ -240,35 +245,48 @@ export async function exportableDataForUser(options: RepositoryOptions = {}): Pr
   return fetchAppData(userId, { client })
 }
 
-export async function loadHabitEntryContexts(options: RepositoryOptions = {}): Promise<HabitEntryContextRow[]> {
+export async function fetchEntryContexts(userId: string, options: RepositoryOptions = {}): Promise<HabitEntryContext[]> {
   const client = repositoryClient(options)
-  const userId = await repositoryUserId(client, options)
   const { data, error } = await client
     .from('habit_entry_contexts')
     .select('*')
     .eq('user_id', userId)
+    .order('habit_id', { ascending: true })
 
   if (error) throw new Error(error.message)
-  return data ?? []
+  return (data ?? []).map(contextRowToHabitEntryContext)
 }
 
-export async function upsertHabitEntryContext(
-  context: HabitEntryContextInput,
+export async function loadHabitEntryContexts(options: RepositoryOptions = {}): Promise<HabitEntryContext[]> {
+  const client = repositoryClient(options)
+  const userId = await repositoryUserId(client, options)
+  return fetchEntryContexts(userId, { client })
+}
+
+export async function upsertEntryContext(
+  context: HabitEntryContext,
   options: RepositoryOptions = {}
-): Promise<HabitEntryContextRow> {
+): Promise<HabitEntryContext> {
   const client = repositoryClient(options)
   const userId = await repositoryUserId(client, options)
   const { data, error } = await client
     .from('habit_entry_contexts')
-    .upsert({ ...context, user_id: userId }, { onConflict: 'entry_id' })
+    .upsert(contextToInsert(context, userId), { onConflict: 'entry_id' })
     .select()
     .single()
 
   if (error) throw new Error(error.message)
-  return data
+  return contextRowToHabitEntryContext(data)
 }
 
-export async function deleteHabitEntryContext(entryId: string, options: RepositoryOptions = {}): Promise<void> {
+export async function upsertHabitEntryContext(
+  context: HabitEntryContext,
+  options: RepositoryOptions = {}
+): Promise<HabitEntryContext> {
+  return upsertEntryContext(context, options)
+}
+
+export async function deleteEntryContext(entryId: string, options: RepositoryOptions = {}): Promise<void> {
   const client = repositoryClient(options)
   const userId = await repositoryUserId(client, options)
   const { error } = await client
@@ -278,6 +296,10 @@ export async function deleteHabitEntryContext(entryId: string, options: Reposito
     .eq('user_id', userId)
 
   if (error) throw new Error(error.message)
+}
+
+export async function deleteHabitEntryContext(entryId: string, options: RepositoryOptions = {}): Promise<void> {
+  return deleteEntryContext(entryId, options)
 }
 
 export async function recordImportBatch(
@@ -327,6 +349,14 @@ async function insertAppData(client: Client, userId: string, data: AppData): Pro
 
     if (error) throw new Error(error.message)
   }
+
+  for (const contexts of chunks(data.entryContexts, 1000)) {
+    const { error } = await client
+      .from('habit_entry_contexts')
+      .insert(contexts.map(context => contextToInsert(context, userId)))
+
+    if (error) throw new Error(error.message)
+  }
 }
 
 async function deleteRowsForUser(
@@ -341,7 +371,8 @@ async function deleteRowsForUser(
 function sortData(data: AppData): AppData {
   return {
     habits: [...data.habits].sort((a, b) => a.position.localeCompare(b.position)),
-    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date))
+    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date)),
+    entryContexts: [...data.entryContexts].sort((a, b) => a.habitId.localeCompare(b.habitId) || a.entryId.localeCompare(b.entryId))
   }
 }
 

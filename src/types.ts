@@ -38,9 +38,22 @@ export interface HabitEntry {
   updatedAt: string
 }
 
+export interface HabitEntryContext {
+  id: string
+  habitId: string
+  entryId: string
+  occurredAt: string | null
+  occurredTime: string | null
+  locationText: string
+  comment: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AppData {
   habits: Habit[]
   entries: HabitEntry[]
+  entryContexts: HabitEntryContext[]
 }
 
 export interface ScorePoint {

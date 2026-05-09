@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AppData, Habit, HabitEntry } from '../types'
-import { parseLoopZip } from '../lib/csv'
+import type { AppData, Habit, HabitEntry, HabitEntryContext } from '../types'
+import { parseImportZip } from '../lib/csv'
 import {
   appendUserDataFromImport,
   createHabit,
+  deleteEntryContext as deleteEntryContextFromSupabase,
   deleteEntry as deleteEntryFromSupabase,
   deleteHabit as deleteHabitFromSupabase,
   exportableDataForUser as loadExportableDataForUser,
   fetchAppData,
   replaceAllUserDataFromImport,
   updateHabit,
+  upsertEntryContext as upsertEntryContextInSupabase,
   upsertEntry as upsertEntryInSupabase
 } from '../lib/supabase/repositories'
 
-const emptyData: AppData = { habits: [], entries: [] }
+const emptyData: AppData = { habits: [], entries: [], entryContexts: [] }
 
 export function useSupabaseAppData(userId: string | null) {
   const [data, setData] = useState<AppData>(emptyData)
@@ -102,7 +104,8 @@ export function useSupabaseAppData(userId: string | null) {
     const previous = dataRef.current
     setData({
       habits: previous.habits.filter(habit => habit.id !== habitId),
-      entries: previous.entries.filter(entry => entry.habitId !== habitId)
+      entries: previous.entries.filter(entry => entry.habitId !== habitId),
+      entryContexts: previous.entryContexts.filter(context => context.habitId !== habitId)
     })
     setError(null)
 
@@ -139,7 +142,8 @@ export function useSupabaseAppData(userId: string | null) {
     const previous = dataRef.current
     setData({
       ...previous,
-      entries: previous.entries.filter(entry => entry.id !== entryId)
+      entries: previous.entries.filter(entry => entry.id !== entryId),
+      entryContexts: previous.entryContexts.filter(context => context.entryId !== entryId)
     })
     setError(null)
 
@@ -158,7 +162,7 @@ export function useSupabaseAppData(userId: string | null) {
     setLoading(true)
     setError(null)
     try {
-      const parsed = await parseLoopZip(file)
+      const parsed = await parseImportZip(file)
       const next = replaceCurrent
         ? await replaceAllUserDataFromImport(parsed, file.name, { userId })
         : await appendUserDataFromImport(parsed, file.name, { userId })
@@ -186,6 +190,43 @@ export function useSupabaseAppData(userId: string | null) {
     }
   }, [userId])
 
+  const upsertEntryContext = useCallback(async (context: HabitEntryContext): Promise<HabitEntryContext> => {
+    if (!userId) throw new Error('Sign in before saving entry context.')
+
+    const previous = dataRef.current
+    setData(mergeEntryContext(previous, context))
+    setError(null)
+
+    try {
+      const saved = await upsertEntryContextInSupabase(context, { userId })
+      setData(current => mergeEntryContext(current, saved))
+      return saved
+    } catch (upsertError) {
+      setData(previous)
+      setError(errorMessage(upsertError, 'Could not save entry context.'))
+      throw upsertError
+    }
+  }, [userId])
+
+  const deleteEntryContext = useCallback(async (entryId: string): Promise<void> => {
+    if (!userId) throw new Error('Sign in before deleting entry context.')
+
+    const previous = dataRef.current
+    setData({
+      ...previous,
+      entryContexts: previous.entryContexts.filter(context => context.entryId !== entryId)
+    })
+    setError(null)
+
+    try {
+      await deleteEntryContextFromSupabase(entryId, { userId })
+    } catch (deleteError) {
+      setData(previous)
+      setError(errorMessage(deleteError, 'Could not delete entry context.'))
+      throw deleteError
+    }
+  }, [userId])
+
   return {
     loading,
     error,
@@ -195,6 +236,8 @@ export function useSupabaseAppData(userId: string | null) {
     deleteHabit,
     upsertEntry,
     deleteEntry,
+    upsertEntryContext,
+    deleteEntryContext,
     importData,
     exportableDataForUser,
     clearError: () => setError(null)
@@ -223,10 +266,23 @@ function mergeEntry(data: AppData, entry: HabitEntry): AppData {
   })
 }
 
+function mergeEntryContext(data: AppData, context: HabitEntryContext): AppData {
+  const entryContexts = data.entryContexts.filter(existing => (
+    existing.id !== context.id &&
+    existing.entryId !== context.entryId
+  ))
+
+  return sortData({
+    ...data,
+    entryContexts: [...entryContexts, context]
+  })
+}
+
 function sortData(data: AppData): AppData {
   return {
     habits: [...data.habits].sort((a, b) => a.position.localeCompare(b.position)),
-    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date))
+    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date)),
+    entryContexts: [...data.entryContexts].sort((a, b) => a.habitId.localeCompare(b.habitId) || a.entryId.localeCompare(b.entryId))
   }
 }
 

@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Habit, HabitEntry, PeriodKind, ScorePoint } from '../types'
+import type { EntryValue, Habit, HabitEntry, HabitEntryContext, PeriodKind, ScorePoint } from '../types'
 import {
   bestStreaks,
   calendarMatrix,
+  createId,
   displayValue,
   entryMap,
   formatNumber,
@@ -16,6 +17,7 @@ import {
   successForDisplay,
   toggleEntry,
   upsertEntry,
+  nowISO,
   weekdayFrequency
 } from '../lib/calculations'
 import { addDays, formatLong, formatShort, monthLabel, shortMonth, todayISO } from '../lib/date'
@@ -23,13 +25,21 @@ import { addDays, formatLong, formatShort, monthLabel, shortMonth, todayISO } fr
 interface Props {
   habit: Habit
   entries: HabitEntry[]
+  entryContexts: HabitEntryContext[]
   onEntriesChange: (entries: HabitEntry[]) => void
+  onSaveEntryWithContext: (entry: HabitEntry, context: HabitEntryContext | null) => void
   onEdit: () => void
 }
 
-export function HabitDetail({ habit, entries, onEntriesChange, onEdit }: Props) {
+export function HabitDetail({ habit, entries, entryContexts, onEntriesChange, onSaveEntryWithContext, onEdit }: Props) {
   const referenceDate = referenceDateForHabit(habit, entries)
+  const [quickDate, setQuickDate] = useState(todayISO())
   const [quickValue, setQuickValue] = useState(habit.type === 'NUMERICAL' ? '0' : 'yes')
+  const [quickNotes, setQuickNotes] = useState('')
+  const [contextOpen, setContextOpen] = useState(false)
+  const [occurredTime, setOccurredTime] = useState('')
+  const [locationText, setLocationText] = useState('')
+  const [comment, setComment] = useState('')
   const [scorePeriod, setScorePeriod] = useState<PeriodKind>('week')
   const [scoreOffset, setScoreOffset] = useState(0)
   const [historyPeriod, setHistoryPeriod] = useState<PeriodKind>('month')
@@ -37,6 +47,44 @@ export function HabitDetail({ habit, entries, onEntriesChange, onEdit }: Props) 
   const [calendarOffset, setCalendarOffset] = useState(0)
 
   const score = latestScore(habit, entries, referenceDate)
+  const selectedEntry = entries.find(entry => entry.habitId === habit.id && entry.date === quickDate)
+  const selectedContext = selectedEntry ? entryContexts.find(context => context.entryId === selectedEntry.id) : undefined
+  const placeLabel = habit.targetType === 'AT_MOST' ? 'Where did it happen?' : 'Where did you do it?'
+
+  useEffect(() => {
+    const entry = entries.find(candidate => candidate.habitId === habit.id && candidate.date === quickDate)
+    const context = entry ? entryContexts.find(candidate => candidate.entryId === entry.id) : undefined
+    setQuickValue(entry ? entryValueToInput(entry.value, habit) : habit.type === 'NUMERICAL' ? '0' : 'yes')
+    setQuickNotes(entry?.notes ?? '')
+    setOccurredTime((context?.occurredTime ?? '').slice(0, 5))
+    setLocationText(context?.locationText ?? '')
+    setComment(context?.comment ?? '')
+    setContextOpen(Boolean(context))
+  }, [habit, entries, entryContexts, quickDate])
+
+  function saveQuickEntry() {
+    const nextEntries = upsertEntry(entries, habit, quickDate, quickValue, quickNotes)
+    const entry = nextEntries.find(candidate => candidate.habitId === habit.id && candidate.date === quickDate)
+    if (!entry) return
+
+    const hasContext = Boolean(occurredTime || locationText.trim() || comment.trim())
+    const timestamp = nowISO()
+    const nextContext = hasContext
+      ? {
+          id: selectedContext?.id ?? createId(),
+          habitId: habit.id,
+          entryId: entry.id,
+          occurredAt: occurredTime ? `${quickDate}T${occurredTime}:00` : null,
+          occurredTime: occurredTime || null,
+          locationText: locationText.trim(),
+          comment: comment.trim(),
+          createdAt: selectedContext?.createdAt ?? timestamp,
+          updatedAt: timestamp
+        }
+      : null
+
+    onSaveEntryWithContext(entry, nextContext)
+  }
 
   return (
     <section className="detailPanel">
@@ -61,7 +109,7 @@ export function HabitDetail({ habit, entries, onEntriesChange, onEdit }: Props) 
 
       <section className="quickPanel">
         <strong>Log</strong>
-        <input type="date" value={todayISO()} readOnly aria-label="Current date" />
+        <input type="date" value={quickDate} onChange={e => setQuickDate(e.target.value)} aria-label="Entry date" />
         {habit.type === 'NUMERICAL' ? (
           <input
             type="number"
@@ -78,7 +126,36 @@ export function HabitDetail({ habit, entries, onEntriesChange, onEdit }: Props) 
             <option value="unknown">Unknown</option>
           </select>
         )}
-        <button type="button" onClick={() => onEntriesChange(upsertEntry(entries, habit, todayISO(), quickValue))}>Save today</button>
+        <input
+          type="text"
+          value={quickNotes}
+          onChange={e => setQuickNotes(e.target.value)}
+          placeholder="Loop-compatible notes"
+          aria-label="Notes"
+        />
+        <button type="button" onClick={saveQuickEntry}>{selectedEntry ? 'Update entry' : 'Save entry'}</button>
+        <details className="contextEditor" open={contextOpen} onToggle={event => setContextOpen(event.currentTarget.open)}>
+          <summary>Optional context</summary>
+          <div className="contextFields">
+            <label>
+              At what time?
+              <input type="time" value={occurredTime} onChange={e => setOccurredTime(e.target.value)} />
+            </label>
+            <label>
+              {placeLabel}
+              <input
+                type="text"
+                value={locationText}
+                onChange={e => setLocationText(e.target.value)}
+                placeholder="Home, office, gym…"
+              />
+            </label>
+            <label>
+              Comment
+              <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3} />
+            </label>
+          </div>
+        </details>
       </section>
 
       <TargetSection habit={habit} entries={entries} referenceDate={referenceDate} />
@@ -139,6 +216,14 @@ function frequencyLabel(habit: Habit): string {
   if (habit.frequencyNumerator === habit.frequencyDenominator) return 'Every day'
   if (habit.frequencyDenominator === 7) return `${habit.frequencyNumerator} / week`
   return `${habit.frequencyNumerator}/${habit.frequencyDenominator}`
+}
+
+function entryValueToInput(value: EntryValue, habit: Habit): string {
+  if (habit.type === 'NUMERICAL') return typeof value === 'number' ? String(value / 1000) : '0'
+  if (value === 'NO') return 'no'
+  if (value === 'SKIP') return 'skip'
+  if (value === 'UNKNOWN') return 'unknown'
+  return 'yes'
 }
 
 function TargetSection({ habit, entries, referenceDate }: { habit: Habit, entries: HabitEntry[], referenceDate: string }) {
