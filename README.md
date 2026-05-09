@@ -48,6 +48,17 @@ Only these variables should be used by the frontend:
 
 Do not put database passwords, service role keys, personal access tokens, or a Supabase Direct Connection String in frontend code, docs, tests, committed files, or generated artifacts.
 
+## Supabase Auth Redirects
+
+Magic links return to the current app origin, for example `http://localhost:5173` during local development or your Vercel production URL after deployment.
+
+In the Supabase dashboard, open **Authentication > URL Configuration** and set:
+
+- **Site URL**: your production Vercel URL, for example `https://open-habits.vercel.app`
+- **Redirect URLs**: add the local Vite URL and every deployed URL that can request magic links, for example `http://localhost:5173/**`, your production Vercel URL, and any Vercel preview URL pattern you use.
+
+If magic-link emails still point to `http://localhost:3000`, remove that stale value from the Supabase Auth URL settings or replace it with the actual Vercel site URL.
+
 ## Supabase CLI
 
 Use the Supabase CLI to link and apply migrations:

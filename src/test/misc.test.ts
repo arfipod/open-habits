@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { getAuthRedirectUrl } from '../lib/supabase/authRedirect'
 import { getSupabaseEnv } from '../lib/supabase/env'
 import { loadSelectedHabitId, saveSelectedHabitId } from '../lib/storage'
 
@@ -24,6 +25,17 @@ describe('Supabase env parsing', () => {
       VITE_SUPABASE_URL: 'not a url',
       VITE_SUPABASE_PUBLISHABLE_KEY: 'key'
     }))).toThrow('valid URL')
+  })
+})
+
+describe('Supabase auth redirects', () => {
+  it('uses the current app origin for magic links', () => {
+    expect(getAuthRedirectUrl({
+      origin: 'https://open-habits.vercel.app',
+      hash: '#auth-callback',
+      search: '?debug=true',
+      pathname: '/habits'
+    } as Location)).toBe('https://open-habits.vercel.app')
   })
 })
 

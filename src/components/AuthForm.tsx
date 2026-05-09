@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { getAuthRedirectUrl } from '../lib/supabase/authRedirect'
 import { supabase } from '../lib/supabase/client'
 
 type Mode = 'login' | 'register'
@@ -53,7 +54,7 @@ export function AuthForm() {
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: trimmedEmail,
         options: {
-          emailRedirectTo: window.location.origin
+          emailRedirectTo: getAuthRedirectUrl()
         }
       })
 

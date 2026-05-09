@@ -120,7 +120,7 @@ describe('App UI flows', () => {
 
     expect(state.signInWithOtp).toHaveBeenCalledWith({
       email: 'reader@example.com',
-      options: { emailRedirectTo: window.location.origin }
+      options: { emailRedirectTo: 'http://localhost:3000' }
     })
   })
 

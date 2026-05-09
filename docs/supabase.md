@@ -61,6 +61,17 @@ Open the local URL printed by Vite. If the default port is already occupied, Vit
 
 If the app logs in successfully but the main screen shows an error such as `Could not find the table 'public.habits' in the schema cache`, the Auth setup is working but the database schema has not been applied to the linked project yet. Run `npx supabase db push`, wait a few seconds for the Supabase REST schema cache to refresh, and reload the app.
 
+## Auth URL Configuration
+
+Magic links use the current browser origin as their redirect target. A link requested from local Vite should return to `http://localhost:5173`. A link requested from the Vercel deployment should return to that Vercel domain.
+
+Supabase only honors redirect targets that are allowed in **Authentication > URL Configuration**. Configure:
+
+- **Site URL**: the production app URL, for example `https://open-habits.vercel.app`.
+- **Redirect URLs**: every origin that can request magic links, including `http://localhost:5173/**`, the production Vercel URL, and any Vercel preview URL pattern used for testing.
+
+If a magic-link email opens `http://localhost:3000`, the Supabase project likely still has `localhost:3000` as its Site URL or the requested app URL is missing from the Redirect URLs allow-list. Update those dashboard settings, request a new magic link, and use the new email. Old magic-link emails keep their original URL.
+
 ## Schema
 
 The current migration creates these application tables:
