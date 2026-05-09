@@ -41,9 +41,8 @@ export async function getCurrentUserId(client: Client = supabase): Promise<strin
   return data.user.id
 }
 
-export async function loadAppData(options: RepositoryOptions = {}): Promise<AppData> {
+export async function fetchAppData(userId: string, options: RepositoryOptions = {}): Promise<AppData> {
   const client = repositoryClient(options)
-  const userId = await repositoryUserId(client, options)
 
   const [habitsResult, entriesResult] = await Promise.all([
     client
@@ -62,10 +61,29 @@ export async function loadAppData(options: RepositoryOptions = {}): Promise<AppD
   if (habitsResult.error) throw new Error(habitsResult.error.message)
   if (entriesResult.error) throw new Error(entriesResult.error.message)
 
-  return {
+  return sortData({
     habits: (habitsResult.data ?? []).map(habitRowToHabit),
     entries: (entriesResult.data ?? []).map(entryRowToHabitEntry)
-  }
+  })
+}
+
+export async function loadAppData(options: RepositoryOptions = {}): Promise<AppData> {
+  const client = repositoryClient(options)
+  const userId = await repositoryUserId(client, options)
+  return fetchAppData(userId, { client })
+}
+
+export async function createHabit(habit: Habit, options: RepositoryOptions = {}): Promise<Habit> {
+  const client = repositoryClient(options)
+  const userId = await repositoryUserId(client, options)
+  const { data, error } = await client
+    .from('habits')
+    .insert(habitToInsert(habit, userId))
+    .select()
+    .single()
+
+  if (error) throw new Error(error.message)
+  return habitRowToHabit(data)
 }
 
 export async function upsertHabit(habit: Habit, options: RepositoryOptions = {}): Promise<Habit> {
@@ -108,7 +126,7 @@ export async function deleteHabit(habitId: string, options: RepositoryOptions = 
   if (error) throw new Error(error.message)
 }
 
-export async function upsertHabitEntry(entry: HabitEntry, options: RepositoryOptions = {}): Promise<HabitEntry> {
+export async function upsertEntry(entry: HabitEntry, options: RepositoryOptions = {}): Promise<HabitEntry> {
   const client = repositoryClient(options)
   const userId = await repositoryUserId(client, options)
   const existing = await client
@@ -144,7 +162,11 @@ export async function upsertHabitEntry(entry: HabitEntry, options: RepositoryOpt
   return entryRowToHabitEntry(data)
 }
 
-export async function deleteHabitEntry(entryId: string, options: RepositoryOptions = {}): Promise<void> {
+export async function upsertHabitEntry(entry: HabitEntry, options: RepositoryOptions = {}): Promise<HabitEntry> {
+  return upsertEntry(entry, options)
+}
+
+export async function deleteEntry(entryId: string, options: RepositoryOptions = {}): Promise<void> {
   const client = repositoryClient(options)
   const userId = await repositoryUserId(client, options)
   const { error } = await client
@@ -156,33 +178,66 @@ export async function deleteHabitEntry(entryId: string, options: RepositoryOptio
   if (error) throw new Error(error.message)
 }
 
-export async function replaceAppData(data: AppData, options: RepositoryOptions = {}): Promise<AppData> {
+export async function deleteHabitEntry(entryId: string, options: RepositoryOptions = {}): Promise<void> {
+  return deleteEntry(entryId, options)
+}
+
+export async function replaceAllUserDataFromImport(
+  data: AppData,
+  fileName: string | null,
+  options: RepositoryOptions = {}
+): Promise<AppData> {
   const client = repositoryClient(options)
   const userId = await repositoryUserId(client, options)
-  const deleteResult = await client
-    .from('habits')
-    .delete()
-    .eq('user_id', userId)
 
-  if (deleteResult.error) throw new Error(deleteResult.error.message)
+  await deleteRowsForUser(client, 'habit_entry_contexts', userId)
+  await deleteRowsForUser(client, 'habit_entries', userId)
+  await deleteRowsForUser(client, 'import_batches', userId)
+  await deleteRowsForUser(client, 'habits', userId)
+  await insertAppData(client, userId, data)
+  await recordImportBatch(
+    {
+      fileName,
+      habitsCount: data.habits.length,
+      entriesCount: data.entries.length,
+      metadata: { mode: 'replace' }
+    },
+    { client, userId }
+  )
 
-  if (data.habits.length) {
-    const { error } = await client
-      .from('habits')
-      .insert(data.habits.map(habit => habitToInsert(habit, userId)))
+  return fetchAppData(userId, { client })
+}
 
-    if (error) throw new Error(error.message)
-  }
+export async function appendUserDataFromImport(
+  data: AppData,
+  fileName: string | null,
+  options: RepositoryOptions = {}
+): Promise<AppData> {
+  const client = repositoryClient(options)
+  const userId = await repositoryUserId(client, options)
 
-  if (data.entries.length) {
-    const { error } = await client
-      .from('habit_entries')
-      .insert(data.entries.map(entry => entryToInsert(entry, userId)))
+  await insertAppData(client, userId, data)
+  await recordImportBatch(
+    {
+      fileName,
+      habitsCount: data.habits.length,
+      entriesCount: data.entries.length,
+      metadata: { mode: 'append' }
+    },
+    { client, userId }
+  )
 
-    if (error) throw new Error(error.message)
-  }
+  return fetchAppData(userId, { client })
+}
 
-  return loadAppData({ client, userId })
+export async function replaceAppData(data: AppData, options: RepositoryOptions = {}): Promise<AppData> {
+  return replaceAllUserDataFromImport(data, null, options)
+}
+
+export async function exportableDataForUser(options: RepositoryOptions = {}): Promise<AppData> {
+  const client = repositoryClient(options)
+  const userId = await repositoryUserId(client, options)
+  return fetchAppData(userId, { client })
 }
 
 export async function loadHabitEntryContexts(options: RepositoryOptions = {}): Promise<HabitEntryContextRow[]> {
@@ -254,4 +309,46 @@ function repositoryClient(options: RepositoryOptions): Client {
 
 async function repositoryUserId(client: Client, options: RepositoryOptions): Promise<string> {
   return options.userId ?? getCurrentUserId(client)
+}
+
+async function insertAppData(client: Client, userId: string, data: AppData): Promise<void> {
+  for (const habits of chunks(data.habits, 500)) {
+    const { error } = await client
+      .from('habits')
+      .insert(habits.map(habit => habitToInsert(habit, userId)))
+
+    if (error) throw new Error(error.message)
+  }
+
+  for (const entries of chunks(data.entries, 1000)) {
+    const { error } = await client
+      .from('habit_entries')
+      .insert(entries.map(entry => entryToInsert(entry, userId)))
+
+    if (error) throw new Error(error.message)
+  }
+}
+
+async function deleteRowsForUser(
+  client: Client,
+  table: 'habit_entry_contexts' | 'habit_entries' | 'import_batches' | 'habits',
+  userId: string
+): Promise<void> {
+  const { error } = await client.from(table).delete().eq('user_id', userId)
+  if (error) throw new Error(error.message)
+}
+
+function sortData(data: AppData): AppData {
+  return {
+    habits: [...data.habits].sort((a, b) => a.position.localeCompare(b.position)),
+    entries: [...data.entries].sort((a, b) => a.habitId.localeCompare(b.habitId) || b.date.localeCompare(a.date))
+  }
+}
+
+function chunks<T>(values: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < values.length; i += size) {
+    out.push(values.slice(i, i + size))
+  }
+  return out
 }

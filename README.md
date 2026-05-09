@@ -8,6 +8,7 @@ Responsive React + Vite + TypeScript frontend that replicates the core logic of 
 unzip open-habits-loop-v03.zip
 cd open-habits-loop-v03
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -19,9 +20,10 @@ http://localhost:5173
 
 ## Import a Loop Habit Tracker ZIP
 
-1. Click **Import ZIP**.
-2. Select the ZIP exported from Android Habits / Loop Habit Tracker.
-3. Keep **Replace on import** enabled to clear previous data.
+1. Sign in or create an account.
+2. Click **Import ZIP**.
+3. Select the ZIP exported from Android Habits / Loop Habit Tracker.
+4. Keep **Replace on import** enabled to clear previous Supabase data for your user.
 
 The app reads:
 
@@ -66,4 +68,5 @@ With the `No PMO` sample ZIP, the expected latest score is `0.8453` for `2026-05
 - Calendar in a Monday-Sunday weekly grid with horizontal navigation.
 - Best streaks.
 - Frequency.
-- Local persistence with `localStorage`.
+- Supabase Auth and per-user Supabase persistence.
+- `localStorage` is used only for harmless UI preferences such as the last selected habit.

@@ -1,26 +1,57 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AppData, Habit } from './types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import type { Habit, HabitEntry } from './types'
+import { AuthGate } from './components/AuthGate'
 import { HabitDetail } from './components/HabitDetail'
 import { HabitForm } from './components/HabitForm'
 import { HabitList } from './components/HabitList'
-import { clearData, loadData, saveData } from './lib/storage'
+import { UserMenu } from './components/UserMenu'
 import { defaultHabit, normalizeHabit, referenceDateForData } from './lib/calculations'
-import { exportDebugSummary, exportLoopZip, importLoopZip } from './lib/csv'
+import { exportLoopZip } from './lib/csv'
 import { todayISO } from './lib/date'
+import { loadSelectedHabitId, saveSelectedHabitId } from './lib/storage'
+import { useSupabaseAppData } from './hooks/useSupabaseAppData'
 
-const emptyData: AppData = { habits: [], entries: [] }
+interface Notice {
+  kind: 'success' | 'error'
+  text: string
+}
 
 export default function App() {
-  const [data, setData] = useState<AppData>(() => loadData() ?? emptyData)
-  const [selectedId, setSelectedId] = useState<string | null>(() => loadData()?.habits[0]?.id ?? null)
+  return (
+    <AuthGate>
+      {session => <HabitsApp session={session} />}
+    </AuthGate>
+  )
+}
+
+function HabitsApp({ session }: { session: Session }) {
+  const {
+    data,
+    loading,
+    error,
+    refresh,
+    saveHabit: persistHabit,
+    deleteHabit: deleteHabitFromSupabase,
+    upsertEntry: persistEntry,
+    deleteEntry: deleteEntryFromSupabase,
+    importData,
+    exportableDataForUser,
+    clearError
+  } = useSupabaseAppData(session.user.id)
+  const [selectedId, setSelectedIdState] = useState<string | null>(() => loadSelectedHabitId())
   const [replaceImport, setReplaceImport] = useState(true)
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const [exportSelection, setExportSelection] = useState<Set<string>>(new Set())
   const [includeAllMetadata, setIncludeAllMetadata] = useState(true)
+  const [notice, setNotice] = useState<Notice | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => saveData(data), [data])
+  const setSelectedId = useCallback((habitId: string | null) => {
+    setSelectedIdState(habitId)
+    saveSelectedHabitId(habitId)
+  }, [])
 
   const visibleHabits = useMemo(() => data.habits.filter(h => !h.archived), [data.habits])
   const selectedHabit = useMemo(() => {
@@ -29,18 +60,28 @@ export default function App() {
   }, [data.habits, selectedId, visibleHabits])
 
   useEffect(() => {
-    if (!selectedId && selectedHabit) setSelectedId(selectedHabit.id)
-  }, [selectedHabit, selectedId])
+    if (selectedHabit && selectedHabit.id !== selectedId) setSelectedId(selectedHabit.id)
+    if (!selectedHabit && selectedId) setSelectedId(null)
+  }, [selectedHabit, selectedId, setSelectedId])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(null), 5200)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  function notify(kind: Notice['kind'], text: string) {
+    setNotice({ kind, text })
+  }
 
   async function handleImport(file: File) {
     try {
-      const next = await importLoopZip(file, replaceImport, data)
-      setData(next)
+      const next = await importData(file, replaceImport)
       const firstWithEntries = next.habits.find(h => next.entries.some(e => e.habitId === h.id))
       setSelectedId((firstWithEntries ?? next.habits[0])?.id ?? null)
-      alert(`Import complete.\n\n${next.habits.length} habits.\n${next.entries.length} entries.\n\n${exportDebugSummary(next)}`)
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Could not import the ZIP')
+      notify('success', `Imported ${next.habits.length} habits and ${next.entries.length} entries.`)
+    } catch (importError) {
+      notify('error', errorMessage(importError, 'Could not import the ZIP.'))
     } finally {
       if (fileRef.current) fileRef.current.value = ''
     }
@@ -53,45 +94,92 @@ export default function App() {
 
   async function handleExport() {
     if (exportSelection.size === 0) {
-      alert('Select at least one habit to export.')
+      notify('error', 'Select at least one habit to export.')
       return
     }
-    const blob = await exportLoopZip(data, exportSelection, includeAllMetadata)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `open-habits-export-${todayISO()}.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-    setExportOpen(false)
-  }
 
-  function saveHabit(habit: Habit) {
-    const normalized = normalizeHabit(habit)
-    setData(prev => {
-      const exists = prev.habits.some(h => h.id === normalized.id)
-      return {
-        ...prev,
-        habits: exists
-          ? prev.habits.map(h => h.id === normalized.id ? normalized : h)
-          : [...prev.habits, normalized].sort((a, b) => a.position.localeCompare(b.position))
+    try {
+      const freshData = await exportableDataForUser()
+      const freshHabitIds = new Set(freshData.habits.map(habit => habit.id))
+      const selected = new Set([...exportSelection].filter(habitId => freshHabitIds.has(habitId)))
+      if (selected.size === 0) {
+        notify('error', 'Selected habits are no longer available.')
+        return
       }
-    })
-    setSelectedId(normalized.id)
-    setEditingHabit(null)
+
+      const blob = await exportLoopZip(freshData, selected, includeAllMetadata)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `open-habits-export-${todayISO()}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+      setExportOpen(false)
+      notify('success', 'Export ZIP created from fresh Supabase data.')
+    } catch (exportError) {
+      notify('error', errorMessage(exportError, 'Could not export habits.'))
+    }
   }
 
-  function deleteHabit(habitId: string) {
+  async function saveHabit(habit: Habit) {
+    const normalized = normalizeHabit(habit)
+    try {
+      const saved = await persistHabit(normalized)
+      setSelectedId(saved.id)
+      setEditingHabit(null)
+      notify('success', 'Habit saved.')
+    } catch (saveError) {
+      notify('error', errorMessage(saveError, 'Could not save habit.'))
+    }
+  }
+
+  async function deleteHabit(habitId: string) {
     if (!confirm('Delete this habit and all of its entries?')) return
-    setData(prev => ({
-      habits: prev.habits.filter(h => h.id !== habitId),
-      entries: prev.entries.filter(e => e.habitId !== habitId)
-    }))
-    setSelectedId(null)
-    setEditingHabit(null)
+
+    try {
+      await deleteHabitFromSupabase(habitId)
+      setSelectedId(null)
+      setEditingHabit(null)
+      notify('success', 'Habit deleted.')
+    } catch (deleteError) {
+      notify('error', errorMessage(deleteError, 'Could not delete habit.'))
+    }
+  }
+
+  async function saveEntries(nextEntries: HabitEntry[]) {
+    const previousEntries = data.entries
+    const previousById = new Map(previousEntries.map(entry => [entry.id, entry]))
+    const nextById = new Map(nextEntries.map(entry => [entry.id, entry]))
+    const changed = nextEntries.filter(entry => {
+      const previous = previousById.get(entry.id)
+      return !previous || !sameEntry(previous, entry)
+    })
+    const removed = previousEntries.filter(entry => !nextById.has(entry.id))
+
+    try {
+      for (const entry of changed) {
+        await persistEntry(entry)
+      }
+      for (const entry of removed) {
+        await deleteEntryFromSupabase(entry.id)
+      }
+    } catch (entryError) {
+      notify('error', errorMessage(entryError, 'Could not save entry.'))
+    }
+  }
+
+  async function handleRefresh() {
+    try {
+      await refresh()
+      notify('success', 'Habits refreshed.')
+    } catch (refreshError) {
+      notify('error', errorMessage(refreshError, 'Could not refresh habits.'))
+    }
   }
 
   const reference = referenceDateForData(data)
+  const blockingLoad = loading && data.habits.length === 0 && data.entries.length === 0
+  const blockingError = Boolean(error && !loading && data.habits.length === 0 && data.entries.length === 0)
 
   return (
     <main className="appShell">
@@ -106,48 +194,70 @@ export default function App() {
             <input type="checkbox" checked={replaceImport} onChange={e => setReplaceImport(e.target.checked)} />
             Replace on import
           </label>
-          <button type="button" onClick={() => fileRef.current?.click()}>Import ZIP</button>
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={loading}>Import ZIP</button>
           <input ref={fileRef} hidden type="file" accept=".zip" onChange={e => {
             const file = e.currentTarget.files?.[0]
             if (file) void handleImport(file)
           }} />
-          <button type="button" onClick={openExportModal} disabled={!data.habits.length}>Export</button>
-          <button type="button" onClick={() => setEditingHabit(defaultHabit(data.habits.length + 1))}>New</button>
-          <button type="button" className="danger" onClick={() => {
-            if (confirm('Delete all local data?')) {
-              clearData()
-              setData(emptyData)
-              setSelectedId(null)
-            }
-          }}>Reset</button>
+          <button type="button" onClick={openExportModal} disabled={!data.habits.length || loading}>Export</button>
+          <button type="button" onClick={() => setEditingHabit(defaultHabit(data.habits.length + 1))} disabled={loading}>New</button>
+          <button type="button" className="secondary" onClick={() => void handleRefresh()} disabled={loading}>Refresh</button>
+          <UserMenu email={session.user.email} />
         </div>
       </header>
 
-      <div className="appLayout">
-        <HabitList
-          habits={visibleHabits}
-          entries={data.entries}
-          selectedId={selectedHabit?.id ?? null}
-          onSelect={setSelectedId}
-          onEntriesChange={entries => setData(prev => ({ ...prev, entries }))}
-        />
+      {(notice || error) && (
+        <div
+          className={`toast ${notice?.kind === 'error' || (!notice && error) ? 'error' : ''}`}
+          role={notice?.kind === 'error' || (!notice && error) ? 'alert' : 'status'}
+        >
+          <span>{notice?.text ?? error}</span>
+          <button type="button" className="ghost" onClick={() => { setNotice(null); clearError() }}>×</button>
+        </div>
+      )}
 
-        {selectedHabit ? (
-          <HabitDetail
-            habit={selectedHabit}
-            entries={data.entries}
-            onEntriesChange={entries => setData(prev => ({ ...prev, entries }))}
-            onEdit={() => setEditingHabit(selectedHabit)}
-          />
-        ) : (
+      <div className="appLayout">
+        {blockingLoad ? (
           <section className="emptyState">
-            <h2>No habits loaded</h2>
-            <p>Import your Android Habits / Loop Habit Tracker ZIP or create a new habit.</p>
+            <h2>Loading habits</h2>
+            <p>Reading your Supabase habits and entries.</p>
+          </section>
+        ) : blockingError ? (
+          <section className="emptyState">
+            <h2>Error loading data</h2>
+            <p>{error}</p>
             <div>
-              <button type="button" onClick={() => fileRef.current?.click()}>Import ZIP</button>
-              <button type="button" className="secondary" onClick={() => setEditingHabit(defaultHabit(1))}>Create habit</button>
+              <button type="button" onClick={() => void handleRefresh()}>Retry</button>
             </div>
           </section>
+        ) : (
+          <>
+            <HabitList
+              habits={visibleHabits}
+              entries={data.entries}
+              selectedId={selectedHabit?.id ?? null}
+              onSelect={setSelectedId}
+              onEntriesChange={entries => void saveEntries(entries)}
+            />
+
+            {selectedHabit ? (
+              <HabitDetail
+                habit={selectedHabit}
+                entries={data.entries}
+                onEntriesChange={entries => void saveEntries(entries)}
+                onEdit={() => setEditingHabit(selectedHabit)}
+              />
+            ) : (
+              <section className="emptyState">
+                <h2>No habits loaded</h2>
+                <p>Import your Android Habits / Loop Habit Tracker ZIP or create a new habit.</p>
+                <div>
+                  <button type="button" onClick={() => fileRef.current?.click()}>Import ZIP</button>
+                  <button type="button" className="secondary" onClick={() => setEditingHabit(defaultHabit(1))}>Create habit</button>
+                </div>
+              </section>
+            )}
+          </>
         )}
       </div>
 
@@ -155,8 +265,8 @@ export default function App() {
         <HabitForm
           habit={editingHabit}
           onCancel={() => setEditingHabit(null)}
-          onSave={saveHabit}
-          onDelete={data.habits.some(h => h.id === editingHabit.id) ? deleteHabit : undefined}
+          onSave={habit => void saveHabit(habit)}
+          onDelete={data.habits.some(h => h.id === editingHabit.id) ? habitId => void deleteHabit(habitId) : undefined}
         />
       )}
 
@@ -206,4 +316,17 @@ export default function App() {
       )}
     </main>
   )
+}
+
+function sameEntry(a: HabitEntry, b: HabitEntry): boolean {
+  return a.habitId === b.habitId &&
+    a.date === b.date &&
+    a.value === b.value &&
+    a.notes === b.notes &&
+    a.createdAt === b.createdAt &&
+    a.updatedAt === b.updatedAt
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
 }

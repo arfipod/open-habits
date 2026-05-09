@@ -69,8 +69,8 @@ function habitFolderName(index: number, habit: Habit): string {
   return `${String(index + 1).padStart(3, '0')} ${sanitizeFolderName(habit.name)}/`
 }
 
-export async function importLoopZip(file: File, replaceCurrent: boolean, current: AppData): Promise<AppData> {
-  const zip = await JSZip.loadAsync(file)
+export async function parseLoopZip(file: File): Promise<AppData> {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer())
   const habitsEntry = zip.file('Habits.csv')
   if (!habitsEntry) throw new Error('The ZIP does not contain Habits.csv')
 
@@ -168,11 +168,16 @@ export async function importLoopZip(file: File, replaceCurrent: boolean, current
     }
   }
 
-  const next = replaceCurrent
-    ? { habits: importedHabits, entries: importedEntries }
-    : { habits: [...current.habits, ...importedHabits], entries: [...current.entries, ...importedEntries] }
+  return sortData({ habits: importedHabits, entries: importedEntries })
+}
 
-  return sortData(next)
+export async function importLoopZip(file: File, replaceCurrent: boolean, current: AppData): Promise<AppData> {
+  const imported = await parseLoopZip(file)
+  if (replaceCurrent) return imported
+  return sortData({
+    habits: [...current.habits, ...imported.habits],
+    entries: [...current.entries, ...imported.entries]
+  })
 }
 
 function sortData(data: AppData): AppData {
