@@ -1,32 +1,98 @@
-# Supabase Security
+# Security
 
-This repository may be public, so secrets must stay out of the codebase and out of Git.
+Open Habits handles personal habit data. Treat habit names, entries, notes, locations, comments, and context as private user data.
 
 ## Environment Variables
 
-The Supabase publishable key can be used in the frontend, but it must be configured in `.env.local`:
+The frontend may use only:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+Example `.env.local`:
 
 ```env
 VITE_SUPABASE_URL=https://tpehkqzwlbtdonizlody.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+VITE_SUPABASE_PUBLISHABLE_KEY=your_publishable_key_here
 ```
 
-Do not commit `.env.local`. Use `.env.example` as a template without secret values.
+The project URL is public. The publishable key belongs in `.env.local`; docs should use a placeholder, not a real value.
 
-## Private Credentials
+## Secrets
 
-The Postgres Direct Connection String must not be used in the frontend and must never be committed. Database passwords, service role keys, and private tokens must never be committed either.
+Never commit real secrets.
 
-If a task requires administrative access or a Postgres connection string, keep those values only in a secret manager or in local environment variables outside the repository.
+Do not commit:
 
-## Supabase CLI
+- `.env`
+- `.env.local`
+- Supabase Direct Connection String
+- Postgres passwords
+- service role keys
+- personal access tokens
+- private deployment tokens
 
-To link the project locally, use the Supabase CLI through `npx`:
+The Supabase Direct Connection String is only for local CLI usage, private migration tooling, or secure deployment workflows. It must never appear in frontend code, tests, documentation, committed files, or generated artifacts.
 
-```sh
-npx --yes supabase@latest login
-npx --yes supabase@latest init
-npx --yes supabase@latest link --project-ref tpehkqzwlbtdonizlody
+If a secret is pasted into the repository, remove it immediately and rotate it in the provider dashboard.
+
+## Supabase
+
+Use Supabase Auth and RLS as the security boundary.
+
+Required RLS pattern for user-owned tables:
+
+```sql
+user_id = auth.uid()
 ```
 
-Migrations must live in `supabase/migrations`.
+Required RLS pattern for profiles:
+
+```sql
+id = auth.uid()
+```
+
+Do not disable RLS for convenience. Do not use a service role key from frontend code.
+
+## Local Storage
+
+`localStorage` may store harmless UI preferences only.
+
+Allowed examples:
+
+- selected habit id
+- last selected period
+- UI display options
+- theme preference
+
+Do not store:
+
+- full app data
+- Supabase credentials
+- habit entries
+- private context comments
+- location text
+
+## Import and Export Privacy
+
+Android-compatible Loop exports must exclude Open Habits-only context:
+
+- `locationText`
+- `occurredAt`
+- `occurredTime`
+- context comments
+- Supabase user ids
+- import batch metadata
+- private application state
+
+Open Habits full backups may include context and should be treated as private user data.
+
+## Documentation
+
+Documentation may contain public project references such as:
+
+```text
+https://tpehkqzwlbtdonizlody.supabase.co
+```
+
+Documentation must not contain real secret values.

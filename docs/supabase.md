@@ -1,8 +1,12 @@
 # Supabase
 
-Open Habits uses Supabase Auth and Supabase Postgres for the shared source of truth. The frontend must only use the project URL and publishable key.
+Open Habits uses Supabase Auth and Supabase Postgres as the shared source of truth. The frontend must only use the project URL and publishable key.
 
-Never put database connection URLs, Postgres passwords, service role keys, or personal access tokens in frontend code, tests, docs, or committed files.
+Public project URL:
+
+```text
+https://tpehkqzwlbtdonizlody.supabase.co
+```
 
 ## Environment
 
@@ -19,14 +23,17 @@ VITE_SUPABASE_URL=https://tpehkqzwlbtdonizlody.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your_publishable_key_here
 ```
 
-## Project Setup
+Do not place database connection URLs, Postgres passwords, service role keys, personal access tokens, or a Supabase Direct Connection String in frontend code, tests, docs, committed files, or generated artifacts.
 
-Install and authenticate the Supabase CLI, then link this repository to the project:
+## CLI Setup
+
+Use the Supabase CLI:
 
 ```bash
 supabase login
 supabase init
 supabase link --project-ref tpehkqzwlbtdonizlody
+supabase db push
 ```
 
 The database migration files live in:
@@ -35,50 +42,70 @@ The database migration files live in:
 supabase/migrations/
 ```
 
-## Apply Migrations
+## Schema
 
-Push the local migrations to the linked Supabase project:
+The current migration creates these application tables:
+
+- `profiles`
+- `habits`
+- `habit_entries`
+- `habit_entry_contexts`
+- `import_batches`
+
+`profiles` stores one profile row per Supabase Auth user. A database trigger creates or updates the profile when a user is inserted into `auth.users`.
+
+`habits` stores habit metadata: position, name, type, question, description, frequency, color, unit, target type, target value, archived state, source, external id, and timestamps.
+
+`habit_entries` stores one value per user, habit, and date. Boolean-style values are stored in `value_kind`. Numerical values use `value_kind = 'NUMERIC'` plus `numeric_value`, where values imported from Loop Habit Tracker are scaled by 1000.
+
+`habit_entry_contexts` stores Open Habits-only context for entries: `occurred_at`, `occurred_time`, `location_text`, and `comment`.
+
+`import_batches` stores lightweight audit metadata for imports: source app, file name, counts, metadata, and creation time.
+
+The schema also includes uniqueness constraints, ownership-preserving foreign keys, indexes, and `updated_at` triggers.
+
+## Row Level Security
+
+RLS is enabled on every application table.
+
+`profiles` policies restrict rows to:
+
+```sql
+id = auth.uid()
+```
+
+All other user-owned tables restrict select, insert, update, and delete to:
+
+```sql
+user_id = auth.uid()
+```
+
+Do not disable RLS for convenience. Do not use a service role key from frontend code.
+
+## Migrations
+
+Add schema changes as new SQL files under:
+
+```text
+supabase/migrations/
+```
+
+After adding or changing migrations:
 
 ```bash
 supabase db push
 ```
 
-The initial migration creates the `public` tables, constraints, indexes, update triggers, profile bootstrap trigger, and row-level security policies.
-
-## Regenerate Types
-
-After schema changes, regenerate the TypeScript database types:
+When a migration changes the public schema, regenerate TypeScript types:
 
 ```bash
 npx supabase gen types typescript --project-id tpehkqzwlbtdonizlody > src/lib/supabase/database.types.ts
 ```
 
-## Tables
+## Data Access
 
-`profiles` stores one profile row per Supabase Auth user. It is created automatically by the `auth.users` insert trigger.
+Use repository functions from `src/lib/supabase/repositories.ts` rather than querying Supabase directly in components.
 
-`habits` stores habit metadata: type, target, frequency, color, archived state, and optional import source identifiers.
+Use mapper functions from `src/lib/supabase/mappers.ts` to translate between database rows and domain types.
 
-`habit_entries` stores one value per user, habit, and date. Boolean-style values are stored in `value_kind`; numerical habit values use `value_kind = 'NUMERIC'` and `numeric_value`, with Loop-compatible values scaled by 1000.
-
-`habit_entry_contexts` stores Open Habits-only optional context for entries: occurred timestamp, occurred time, location text, and comment.
-
-`import_batches` stores lightweight audit metadata for ZIP imports.
-
-## Row-Level Security
-
-RLS is enabled on every application table.
-
-`profiles` policies restrict access to rows where `id = auth.uid()`.
-
-All other tables restrict select, insert, update, and delete to rows where `user_id = auth.uid()`.
-
-Foreign-key constraints also keep entry and context rows tied to habits and entries owned by the same `user_id`.
-
-## Android-Compatible Exports
-
-`habit_entry_contexts` must not be included in Android-compatible Loop Habit Tracker ZIP exports.
-
-Loop Habit Tracker understands `Habits.csv`, `Checkmarks.csv`, `Scores.csv`, and per-habit checkmark/score CSV files. It does not understand Open Habits-only fields such as `location_text`, `occurred_at`, `occurred_time`, or context comments. Including those fields would make the export non-compatible and could leak private metadata into a file intended for Android import.
-
-Open Habits full backups may include context metadata because they target this app's own restore flow rather than Loop Habit Tracker compatibility.
+Tests should mock the Supabase client and should not require real Supabase credentials.
