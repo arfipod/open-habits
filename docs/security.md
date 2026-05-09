@@ -21,12 +21,12 @@ If a task requires administrative access or a Postgres connection string, keep t
 
 ## Supabase CLI
 
-To link the project locally:
+To link the project locally, use the Supabase CLI through `npx`:
 
 ```sh
-supabase login
-supabase init
-supabase link --project-ref tpehkqzwlbtdonizlody
+npx --yes supabase@latest login
+npx --yes supabase@latest init
+npx --yes supabase@latest link --project-ref tpehkqzwlbtdonizlody
 ```
 
 Migrations must live in `supabase/migrations`.
